@@ -548,6 +548,101 @@ function isLikelyUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 }
 
+function getAccessTokenFromRequest(req) {
+  const authHeader = String(req?.headers?.authorization || "").trim();
+  const match = /^Bearer\s+(.+)$/i.exec(authHeader);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+async function getAuthenticatedSupabaseUser(req) {
+  const accessToken = getAccessTokenFromRequest(req);
+  if (!accessToken) {
+    return { ok: false, status: 401, error: "Missing auth token." };
+  }
+  return fetchSupabaseUserByAccessToken(accessToken, req);
+}
+
+async function readProfileForCredits(req, userId) {
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return { ok: false, status: 500, error: service.error };
+  }
+
+  const { config, headers } = service;
+  const profileResponse = await fetch(
+    `${config.url}/rest/v1/profiles?select=id,credits_balance&id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {
+      method: "GET",
+      headers,
+    },
+  );
+  if (!profileResponse.ok) {
+    const reason = await profileResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to read credits.${reason ? ` ${reason}` : ""}` };
+  }
+  const rows = await profileResponse.json().catch(() => []);
+  const profile = Array.isArray(rows) ? rows[0] : null;
+  if (!profile) {
+    return { ok: false, status: 404, error: "Profile not found." };
+  }
+
+  const currentCredits = Math.max(0, Math.floor(Number(profile?.credits_balance || 0)));
+  return { ok: true, config, headers, currentCredits };
+}
+
+async function applyCreditDelta({ req, userId, delta, reason, source = "studio", meta = null }) {
+  const parsedDelta = Math.trunc(Number(delta || 0));
+  if (!Number.isFinite(parsedDelta) || parsedDelta === 0) {
+    return { ok: false, status: 400, error: "Invalid credit delta." };
+  }
+
+  const profileResult = await readProfileForCredits(req, userId);
+  if (!profileResult.ok) return profileResult;
+  const { config, headers, currentCredits } = profileResult;
+
+  if (parsedDelta < 0 && currentCredits < Math.abs(parsedDelta)) {
+    return { ok: false, status: 402, error: "Insufficient credits.", creditsBalance: currentCredits };
+  }
+
+  const nextCredits = Math.max(0, currentCredits + parsedDelta);
+  const ledgerResponse = await fetch(`${config.url}/rest/v1/credit_ledger`, {
+    method: "POST",
+    headers: {
+      ...headers,
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify([
+      {
+        user_id: userId,
+        project_id: null,
+        delta: parsedDelta,
+        reason,
+        source,
+        meta: meta && typeof meta === "object" ? meta : null,
+      },
+    ]),
+  });
+  if (!ledgerResponse.ok) {
+    const ledgerReason = await ledgerResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to record credit charge.${ledgerReason ? ` ${ledgerReason}` : ""}` };
+  }
+
+  const patchResponse = await fetch(`${config.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: {
+      ...headers,
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify({ credits_balance: nextCredits }),
+  });
+  if (!patchResponse.ok) {
+    const patchReason = await patchResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to update profile credits.${patchReason ? ` ${patchReason}` : ""}` };
+  }
+
+  return { ok: true, creditsBalance: nextCredits };
+}
+
 async function handleAdminUsersList(req, res) {
   if (!isAdminAuthenticated(req)) {
     return sendJson(res, 401, { error: "Unauthorized." });
@@ -1184,6 +1279,8 @@ function extractImageDataFromNanoBananaResponse(payload) {
 
 async function handleNanoBananaEdit(req, res) {
   let raw = "";
+  let chargedUserId = "";
+  let chargedCost = 0;
   req.on("data", (chunk) => {
     raw += chunk;
     if (raw.length > 30 * 1024 * 1024) {
@@ -1193,21 +1290,82 @@ async function handleNanoBananaEdit(req, res) {
 
   req.on("end", async () => {
     try {
+      const authResult = await getAuthenticatedSupabaseUser(req);
+      if (!authResult.ok) {
+        return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+      }
+      const userId = String(authResult.user?.id || "").trim();
+      if (!userId) {
+        return sendJson(res, 401, { error: "Unauthorized." });
+      }
+
+      const cost = 1;
+      const chargeResult = await applyCreditDelta({
+        req,
+        userId,
+        delta: -cost,
+        reason: "ai_edit",
+        source: "studio",
+      });
+      if (!chargeResult.ok) {
+        if (chargeResult.status === 402) {
+          return sendJson(res, 402, {
+            error: "Insufficient credits.",
+            creditsBalance: Number(chargeResult.creditsBalance || 0),
+          });
+        }
+        return sendJson(res, chargeResult.status || 500, { error: chargeResult.error || "Unable to charge credits." });
+      }
+      chargedUserId = userId;
+      chargedCost = cost;
+
       const { prompt, imageDataUrl } = JSON.parse(raw || "{}");
       if (!prompt || !imageDataUrl) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_edit_refund",
+          source: "studio",
+          meta: { reason: "validation_failed" },
+        }).catch(() => {});
         return sendJson(res, 400, { error: "Missing prompt or imageDataUrl." });
       }
 
       const match = /^data:(.*?);base64,(.*)$/.exec(imageDataUrl);
       if (!match) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_edit_refund",
+          source: "studio",
+          meta: { reason: "invalid_image_payload" },
+        }).catch(() => {});
         return sendJson(res, 400, { error: "Invalid imageDataUrl." });
       }
 
       const googleApiKey = normalizeGoogleApiKey(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "");
       if (!googleApiKey) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_edit_refund",
+          source: "studio",
+          meta: { reason: "missing_api_key" },
+        }).catch(() => {});
         return sendJson(res, 500, { error: "Server missing GOOGLE_API_KEY or GEMINI_API_KEY in environment." });
       }
       if (!isLikelyGoogleApiKey(googleApiKey)) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_edit_refund",
+          source: "studio",
+          meta: { reason: "invalid_api_key" },
+        }).catch(() => {});
         return sendJson(res, 500, { error: "Invalid Google API key format in environment." });
       }
 
@@ -1259,7 +1417,12 @@ async function handleNanoBananaEdit(req, res) {
           if (response.ok) {
             const editedImageDataUrl = extractImageDataFromNanoBananaResponse(payload);
             if (editedImageDataUrl) {
-              return sendJson(res, 200, { imageDataUrl: editedImageDataUrl });
+              chargedUserId = "";
+              chargedCost = 0;
+              return sendJson(res, 200, {
+                imageDataUrl: editedImageDataUrl,
+                creditsBalance: Number(chargeResult.creditsBalance || 0),
+              });
             }
             lastError = "No image returned from editor response.";
             lastStatusCode = 502;
@@ -1297,8 +1460,28 @@ async function handleNanoBananaEdit(req, res) {
         }
       }
 
+      await applyCreditDelta({
+        req,
+        userId,
+        delta: cost,
+        reason: "ai_edit_refund",
+        source: "studio",
+        meta: { reason: "upstream_failed" },
+      }).catch(() => {});
+      chargedUserId = "";
+      chargedCost = 0;
       return sendJson(res, lastStatusCode, { error: lastError });
     } catch (error) {
+      if (chargedUserId && chargedCost > 0) {
+        await applyCreditDelta({
+          req,
+          userId: chargedUserId,
+          delta: chargedCost,
+          reason: "ai_edit_refund",
+          source: "studio",
+          meta: { reason: "unexpected_server_error" },
+        }).catch(() => {});
+      }
       return sendJson(res, 500, { error: error?.message || "Unexpected server error." });
     }
   });
@@ -1306,6 +1489,8 @@ async function handleNanoBananaEdit(req, res) {
 
 async function handleNanoBananaGenerate(req, res) {
   let raw = "";
+  let chargedUserId = "";
+  let chargedCost = 0;
   req.on("data", (chunk) => {
     raw += chunk;
     if (raw.length > 2 * 1024 * 1024) {
@@ -1315,16 +1500,69 @@ async function handleNanoBananaGenerate(req, res) {
 
   req.on("end", async () => {
     try {
+      const authResult = await getAuthenticatedSupabaseUser(req);
+      if (!authResult.ok) {
+        return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+      }
+      const userId = String(authResult.user?.id || "").trim();
+      if (!userId) {
+        return sendJson(res, 401, { error: "Unauthorized." });
+      }
+
+      const cost = 1;
+      const chargeResult = await applyCreditDelta({
+        req,
+        userId,
+        delta: -cost,
+        reason: "ai_generate",
+        source: "studio",
+      });
+      if (!chargeResult.ok) {
+        if (chargeResult.status === 402) {
+          return sendJson(res, 402, {
+            error: "Insufficient credits.",
+            creditsBalance: Number(chargeResult.creditsBalance || 0),
+          });
+        }
+        return sendJson(res, chargeResult.status || 500, { error: chargeResult.error || "Unable to charge credits." });
+      }
+      chargedUserId = userId;
+      chargedCost = cost;
+
       const { prompt, resolution, aspectRatio } = JSON.parse(raw || "{}");
       if (!prompt) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_generate_refund",
+          source: "studio",
+          meta: { reason: "validation_failed" },
+        }).catch(() => {});
         return sendJson(res, 400, { error: "Missing prompt." });
       }
 
       const googleApiKey = normalizeGoogleApiKey(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "");
       if (!googleApiKey) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_generate_refund",
+          source: "studio",
+          meta: { reason: "missing_api_key" },
+        }).catch(() => {});
         return sendJson(res, 500, { error: "Server missing GOOGLE_API_KEY or GEMINI_API_KEY in environment." });
       }
       if (!isLikelyGoogleApiKey(googleApiKey)) {
+        await applyCreditDelta({
+          req,
+          userId,
+          delta: cost,
+          reason: "ai_generate_refund",
+          source: "studio",
+          meta: { reason: "invalid_api_key" },
+        }).catch(() => {});
         return sendJson(res, 500, { error: "Invalid Google API key format in environment." });
       }
 
@@ -1385,7 +1623,12 @@ async function handleNanoBananaGenerate(req, res) {
           if (response.ok) {
             const generatedImageDataUrl = extractImageDataFromNanoBananaResponse(payload);
             if (generatedImageDataUrl) {
-              return sendJson(res, 200, { imageDataUrl: generatedImageDataUrl });
+              chargedUserId = "";
+              chargedCost = 0;
+              return sendJson(res, 200, {
+                imageDataUrl: generatedImageDataUrl,
+                creditsBalance: Number(chargeResult.creditsBalance || 0),
+              });
             }
             lastError = "No image returned from generation response.";
             lastStatusCode = 502;
@@ -1422,8 +1665,28 @@ async function handleNanoBananaGenerate(req, res) {
         }
       }
 
+      await applyCreditDelta({
+        req,
+        userId,
+        delta: cost,
+        reason: "ai_generate_refund",
+        source: "studio",
+        meta: { reason: "upstream_failed" },
+      }).catch(() => {});
+      chargedUserId = "";
+      chargedCost = 0;
       return sendJson(res, lastStatusCode, { error: lastError });
     } catch (error) {
+      if (chargedUserId && chargedCost > 0) {
+        await applyCreditDelta({
+          req,
+          userId: chargedUserId,
+          delta: chargedCost,
+          reason: "ai_generate_refund",
+          source: "studio",
+          meta: { reason: "unexpected_server_error" },
+        }).catch(() => {});
+      }
       return sendJson(res, 500, { error: error?.message || "Unexpected server error." });
     }
   });

@@ -175,10 +175,10 @@ const SNAP_THRESHOLD_PX = 8;
 const DEFAULT_CREDITS = 1000;
 const CREDITS_STORAGE_KEY = "darkroomx_credits";
 const PROFILE_STORAGE_KEY = "darkroomx_profile";
+const AUTH_TOKEN_STORAGE_KEY = "darkroomx_auth_token";
 const CREDIT_COSTS = {
-  export: 10,
-  generate: 10,
-  edit: 10,
+  generate: 1,
+  edit: 1,
 };
 const toneDragState = {
   levelsHandle: null,
@@ -484,6 +484,44 @@ const persistCredits = () => {
   } catch {
     // Ignore storage failures in restricted environments.
   }
+};
+
+const getAuthToken = () => {
+  try {
+    return String(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const getJsonRequestHeaders = () => {
+  const token = getAuthToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
+const syncCreditsFromServer = (creditsBalance) => {
+  const next = Number(creditsBalance);
+  if (!Number.isFinite(next) || next < 0) return;
+  state.credits = Math.floor(next);
+  persistCredits();
+
+  try {
+    const rawProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (rawProfile) {
+      const profile = JSON.parse(rawProfile);
+      if (profile && typeof profile === "object") {
+        profile.creditsBalance = state.credits;
+        window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      }
+    }
+  } catch {
+    // Ignore profile cache sync issues.
+  }
+
+  syncCreditsUI();
 };
 
 const syncCreditsUI = () => {
@@ -2214,10 +2252,6 @@ const appendGeneratedPhotoFromDataUrl = async (imageDataUrl, pendingPhotoId = nu
 
 const submitGenerateRequest = async () => {
   if (state.isSubmittingGenerate) return;
-  if (!creditsService.canAfford(CREDIT_COSTS.generate)) {
-    openCreditsModal({ depleted: true, context: "action" });
-    return;
-  }
 
   const prompt = generatePromptInput.value.trim();
   if (!prompt) {
@@ -2243,12 +2277,18 @@ const submitGenerateRequest = async () => {
 
     const response = await fetch("/api/image-generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getJsonRequestHeaders(),
       body: JSON.stringify({ prompt, resolution, aspectRatio }),
     });
 
     const payload = await response.json();
     if (!response.ok) {
+      if (payload && Number.isFinite(Number(payload.creditsBalance))) {
+        syncCreditsFromServer(payload.creditsBalance);
+      }
+      if (response.status === 402) {
+        openCreditsModal({ depleted: true, context: "action" });
+      }
       throw new Error(payload.error || "Image generation failed.");
     }
     if (!payload.imageDataUrl) {
@@ -2256,7 +2296,7 @@ const submitGenerateRequest = async () => {
     }
 
     await appendGeneratedPhotoFromDataUrl(payload.imageDataUrl, placeholder.id);
-    creditsService.charge(CREDIT_COSTS.generate, "generate", { photoId: placeholder.id });
+    syncCreditsFromServer(payload.creditsBalance);
   } catch (error) {
     const message = error.message || "Unable to generate image.";
     editProcessingStatus.textContent = "Unable to generate image.";
@@ -2275,10 +2315,6 @@ const submitGenerateRequest = async () => {
 
 const submitEditRequest = async () => {
   if (state.isSubmittingEdit) return;
-  if (!creditsService.canAfford(CREDIT_COSTS.edit)) {
-    openCreditsModal({ depleted: true, context: "action" });
-    return;
-  }
 
   const prompt = editPromptInput.value.trim();
   if (!prompt) {
@@ -2304,10 +2340,6 @@ const submitEditRequest = async () => {
     for (let i = 0; i < targets.length; i += 1) {
       const photo = getPhotoById(targets[i].id);
       if (!photo) continue;
-      if (!creditsService.canAfford(CREDIT_COSTS.edit)) {
-        failures.push(`${photo.file.name}: Insufficient credits.`);
-        break;
-      }
       photo.aiJob = { status: "processing", label: `${i + 1}/${targets.length}` };
       renderFilmstrip();
       editProcessingStatus.textContent =
@@ -2317,12 +2349,18 @@ const submitEditRequest = async () => {
         const imageDataUrl = await fileToDataUrl(photo.file);
         const response = await fetch("/api/image-edit", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getJsonRequestHeaders(),
           body: JSON.stringify({ prompt, imageDataUrl }),
         });
 
         const payload = await response.json();
         if (!response.ok) {
+          if (payload && Number.isFinite(Number(payload.creditsBalance))) {
+            syncCreditsFromServer(payload.creditsBalance);
+          }
+          if (response.status === 402) {
+            openCreditsModal({ depleted: true, context: "action" });
+          }
           throw new Error(payload.error || "Image edit failed.");
         }
         if (!payload.imageDataUrl) {
@@ -2333,7 +2371,7 @@ const submitEditRequest = async () => {
         if (inserted?.id) {
           lastInsertedId = inserted.id;
         }
-        creditsService.charge(CREDIT_COSTS.edit, "edit", { sourcePhotoId: photo.id, mode: "initial" });
+        syncCreditsFromServer(payload.creditsBalance);
         photo.aiJob = { status: "done", label: `${i + 1}/${targets.length}` };
       } catch (error) {
         const message = error.message || "Unable to apply image edit.";
@@ -2356,10 +2394,6 @@ const submitEditRequest = async () => {
         const target = failedTargets[i];
         const photo = getPhotoById(target.id);
         if (!photo) continue;
-        if (!creditsService.canAfford(CREDIT_COSTS.edit)) {
-          retryFailures.push(`${target.fileName}: Insufficient credits.`);
-          break;
-        }
         editProcessingStatus.textContent = `Retrying failed edits ${i + 1} of ${failedTargets.length}...`;
 
         try {
@@ -2368,12 +2402,18 @@ const submitEditRequest = async () => {
           renderFilmstrip();
           const response = await fetch("/api/image-edit", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: getJsonRequestHeaders(),
             body: JSON.stringify({ prompt, imageDataUrl }),
           });
 
           const payload = await response.json();
           if (!response.ok) {
+            if (payload && Number.isFinite(Number(payload.creditsBalance))) {
+              syncCreditsFromServer(payload.creditsBalance);
+            }
+            if (response.status === 402) {
+              openCreditsModal({ depleted: true, context: "action" });
+            }
             throw new Error(payload.error || "Image edit failed.");
           }
           if (!payload.imageDataUrl) {
@@ -2384,7 +2424,7 @@ const submitEditRequest = async () => {
           if (inserted?.id) {
             lastInsertedId = inserted.id;
           }
-          creditsService.charge(CREDIT_COSTS.edit, "edit", { sourcePhotoId: photo.id, mode: "retry" });
+          syncCreditsFromServer(payload.creditsBalance);
           photo.aiJob = { status: "done", label: "Done" };
         } catch (error) {
           retryFailures.push(`${target.fileName}: ${error.message || "Unable to apply image edit."}`);
@@ -3176,10 +3216,6 @@ const canvasToBlob = (canvas, type = "image/png", quality) =>
 const exportSelectedPhoto = async () => {
   const photo = getSelectedPhoto();
   if (!photo || !photo.imgEl) return;
-  if (!creditsService.canAfford(CREDIT_COSTS.export)) {
-    openCreditsModal({ depleted: true, context: "action" });
-    return;
-  }
 
   const source = photo.imgEl;
   const radians = (photo.rotation * Math.PI) / 180;
@@ -3216,7 +3252,6 @@ const exportSelectedPhoto = async () => {
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
-      creditsService.charge(CREDIT_COSTS.export, "export", { photoId: photo.id, mode: "save-picker" });
       return;
     } catch (error) {
       if (error?.name === "AbortError") return;
@@ -3229,7 +3264,6 @@ const exportSelectedPhoto = async () => {
   anchor.download = exportName;
   anchor.click();
   URL.revokeObjectURL(downloadUrl);
-  creditsService.charge(CREDIT_COSTS.export, "export", { photoId: photo.id, mode: "download-fallback" });
   if (!state.hasShownExportFallbackHint) {
     state.hasShownExportFallbackHint = true;
     window.alert("Save dialog is not available in this browser/runtime, so the file was downloaded to your default Downloads location.");
