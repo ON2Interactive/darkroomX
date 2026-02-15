@@ -278,7 +278,7 @@ body {
   position: relative;
   min-height: 1100px;
   background:
-    url("/UI%20Assets/Image%2001.png") center center / cover no-repeat,
+    url("/assets/hero-image-01.png") center center / cover no-repeat,
     linear-gradient(170deg, #0f1014 0%, #07080b 42%, #050607 100%);
   overflow: hidden;
 }
@@ -781,7 +781,7 @@ body {
   .landing-hero {
     min-height: 760px;
     background:
-      url("/UI%20Assets/Image%2001.png") center center / cover no-repeat,
+      url("/assets/hero-image-01.png") center center / cover no-repeat,
       linear-gradient(170deg, #0f1014 0%, #07080b 45%, #050607 100%);
   }
 
