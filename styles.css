@@ -241,10 +241,124 @@ body {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.admin-placeholder p {
+.admin-table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.admin-table-head h2 {
   margin: 0;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.admin-refresh-btn {
+  margin-top: 0;
+  width: auto;
+  min-width: 112px;
+  padding: 0 14px;
+}
+
+.admin-users-status {
+  margin: 0 0 10px;
+  min-height: 20px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.9rem;
+}
+
+.admin-table-wrap {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.admin-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+  font-size: 0.9rem;
+  vertical-align: middle;
+}
+
+.admin-users-table thead th {
+  color: rgba(255, 255, 255, 0.86);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-users-table tbody td {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.admin-users-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-col-actions {
+  width: 140px;
+}
+
+.admin-cell-email {
+  font-size: 0.86rem;
+}
+
+.admin-cell-input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 10, 10, 0.52);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 0 10px;
+  font: inherit;
+}
+
+.admin-cell-input-number {
+  max-width: 116px;
+}
+
+.admin-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-row-save-btn,
+.admin-row-delete-btn {
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.admin-row-save-btn {
+  min-width: 60px;
+  padding: 0 10px;
+}
+
+.admin-row-delete-btn {
+  width: 34px;
+  padding: 0;
   font-size: 0.95rem;
+  line-height: 1;
+}
+
+.admin-empty-cell {
+  color: rgba(255, 255, 255, 0.64);
+  text-align: center;
 }
 
 .landing-nav {

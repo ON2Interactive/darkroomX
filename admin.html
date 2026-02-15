@@ -16,7 +16,26 @@
             <button id="adminLogoutBtn" type="button" class="contact-submit-btn admin-logout-btn">Log Out</button>
           </div>
           <div class="admin-placeholder">
-            <p>Users table placeholder (Supabase integration next).</p>
+            <div class="admin-table-head">
+              <h2>Users</h2>
+              <button id="adminRefreshBtn" type="button" class="contact-submit-btn admin-refresh-btn">Refresh</button>
+            </div>
+            <p id="adminUsersStatus" class="admin-users-status" aria-live="polite"></p>
+            <div class="admin-table-wrap">
+              <table class="admin-users-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Username</th>
+                    <th>Credits</th>
+                    <th>Projects</th>
+                    <th>Created</th>
+                    <th class="admin-col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersBody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
@@ -24,7 +43,164 @@
     <script>
       (() => {
         const logoutBtn = document.getElementById("adminLogoutBtn");
-        if (!logoutBtn) return;
+        const refreshBtn = document.getElementById("adminRefreshBtn");
+        const statusEl = document.getElementById("adminUsersStatus");
+        const usersBody = document.getElementById("adminUsersBody");
+        if (!logoutBtn || !refreshBtn || !statusEl || !usersBody) return;
+
+        const setStatus = (message) => {
+          statusEl.textContent = String(message || "");
+        };
+
+        const escapeHtml = (value) =>
+          String(value == null ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+        const formatDate = (iso) => {
+          if (!iso) return "-";
+          const date = new Date(iso);
+          if (!Number.isFinite(date.getTime())) return "-";
+          return date.toLocaleDateString();
+        };
+
+        const renderUsers = (users) => {
+          if (!Array.isArray(users) || users.length === 0) {
+            usersBody.innerHTML = `<tr><td colspan="6" class="admin-empty-cell">No users found.</td></tr>`;
+            return;
+          }
+
+          usersBody.innerHTML = users
+            .map(
+              (user) => `
+                <tr data-user-id="${escapeHtml(user.id)}">
+                  <td class="admin-cell-email">${escapeHtml(user.email || "")}</td>
+                  <td>
+                    <input class="admin-cell-input" type="text" data-field="username" value="${escapeHtml(user.username || "")}" />
+                  </td>
+                  <td>
+                    <input class="admin-cell-input admin-cell-input-number" type="number" min="0" step="1" data-field="creditsBalance" value="${Number(user.creditsBalance || 0)}" />
+                  </td>
+                  <td>${Number(user.activeProjectCount || 0)} active / ${Number(user.projectCount || 0)} total</td>
+                  <td>${escapeHtml(formatDate(user.createdAt))}</td>
+                  <td class="admin-actions-cell">
+                    <button type="button" class="admin-row-save-btn" data-action="save">Save</button>
+                    <button type="button" class="admin-row-delete-btn" data-action="delete" title="Delete user" aria-label="Delete user">🗑</button>
+                  </td>
+                </tr>
+              `,
+            )
+            .join("");
+        };
+
+        const loadUsers = async () => {
+          refreshBtn.disabled = true;
+          setStatus("Loading users...");
+          try {
+            const response = await fetch("/api/admin/users", { method: "GET" });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              setStatus(payload?.error || "Failed to load users.");
+              return;
+            }
+            renderUsers(payload?.users || []);
+            setStatus("");
+          } catch {
+            setStatus("Network error while loading users.");
+          } finally {
+            refreshBtn.disabled = false;
+          }
+        };
+
+        const handleSaveRow = async (row) => {
+          const userId = String(row?.dataset?.userId || "");
+          if (!userId) return;
+          const usernameInput = row.querySelector('input[data-field="username"]');
+          const creditsInput = row.querySelector('input[data-field="creditsBalance"]');
+          if (!usernameInput || !creditsInput) return;
+
+          const username = String(usernameInput.value || "").trim();
+          const creditsBalance = Number(creditsInput.value || "0");
+          if (!username) {
+            setStatus("Username cannot be empty.");
+            usernameInput.focus();
+            return;
+          }
+          if (!Number.isFinite(creditsBalance) || creditsBalance < 0) {
+            setStatus("Credits must be zero or a positive number.");
+            creditsInput.focus();
+            return;
+          }
+
+          setStatus("Saving user...");
+          try {
+            const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                username,
+                creditsBalance: Math.floor(creditsBalance),
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              setStatus(payload?.error || "Failed to save user.");
+              return;
+            }
+            setStatus("User updated.");
+            setTimeout(() => {
+              if (statusEl.textContent === "User updated.") setStatus("");
+            }, 1500);
+          } catch {
+            setStatus("Network error while saving user.");
+          }
+        };
+
+        const handleDeleteRow = async (row) => {
+          const userId = String(row?.dataset?.userId || "");
+          if (!userId) return;
+          if (!window.confirm("Delete this user? This action cannot be undone.")) return;
+
+          setStatus("Deleting user...");
+          try {
+            const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+              method: "DELETE",
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              setStatus(payload?.error || "Failed to delete user.");
+              return;
+            }
+            row.remove();
+            if (!usersBody.querySelector("tr")) {
+              renderUsers([]);
+            }
+            setStatus("User deleted.");
+          } catch {
+            setStatus("Network error while deleting user.");
+          }
+        };
+
+        usersBody.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+          const action = target.getAttribute("data-action");
+          if (!action) return;
+          const row = target.closest("tr");
+          if (!row) return;
+          if (action === "save") {
+            handleSaveRow(row);
+            return;
+          }
+          if (action === "delete") {
+            handleDeleteRow(row);
+          }
+        });
+
+        refreshBtn.addEventListener("click", loadUsers);
         logoutBtn.addEventListener("click", async () => {
           logoutBtn.disabled = true;
           try {
@@ -32,6 +208,8 @@
           } catch {}
           window.location.href = "/adminlogin";
         });
+
+        loadUsers();
       })();
     </script>
   </body>

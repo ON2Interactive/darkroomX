@@ -487,6 +487,258 @@ function handleAdminLogout(_req, res) {
   return sendJson(res, 200, { ok: true });
 }
 
+function parseJsonBody(req, maxBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    let closed = false;
+    req.on("data", (chunk) => {
+      if (closed) return;
+      raw += chunk;
+      if (raw.length > maxBytes) {
+        closed = true;
+        reject(new Error("Request payload too large."));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (closed) return;
+      try {
+        resolve(JSON.parse(raw || "{}"));
+      } catch (error) {
+        reject(new Error(error?.message || "Invalid JSON payload."));
+      }
+    });
+    req.on("error", (error) => {
+      if (closed) return;
+      reject(new Error(error?.message || "Request stream error."));
+    });
+  });
+}
+
+function getSupabaseServiceHeaders(req, prefer = "") {
+  const config = getSupabaseConfig(req);
+  if (!config.url || !config.serviceRoleKey) {
+    return { ok: false, error: "Supabase service role is not configured." };
+  }
+  return {
+    ok: true,
+    config,
+    headers: createSupabaseRequestHeaders({
+      apiKey: config.serviceRoleKey,
+      bearerToken: config.serviceRoleKey,
+      prefer,
+    }),
+  };
+}
+
+function isLikelyUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+async function handleAdminUsersList(req, res) {
+  if (!isAdminAuthenticated(req)) {
+    return sendJson(res, 401, { error: "Unauthorized." });
+  }
+
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return sendJson(res, 500, { error: service.error });
+  }
+
+  const { config, headers } = service;
+  try {
+    const profilesResponse = await fetch(
+      `${config.url}/rest/v1/profiles?select=id,email,username,credits_balance,created_at&order=created_at.desc&limit=500`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+    if (!profilesResponse.ok) {
+      const reason = await profilesResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to fetch profiles.${reason ? ` ${reason}` : ""}` });
+    }
+    const profiles = await profilesResponse.json().catch(() => []);
+
+    const projectsResponse = await fetch(`${config.url}/rest/v1/projects?select=user_id,status&limit=2000`, {
+      method: "GET",
+      headers,
+    });
+    if (!projectsResponse.ok) {
+      const reason = await projectsResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to fetch projects.${reason ? ` ${reason}` : ""}` });
+    }
+    const projects = await projectsResponse.json().catch(() => []);
+
+    const projectCountByUser = new Map();
+    const activeProjectCountByUser = new Map();
+    if (Array.isArray(projects)) {
+      projects.forEach((item) => {
+        const userId = String(item?.user_id || "");
+        if (!userId) return;
+        projectCountByUser.set(userId, (projectCountByUser.get(userId) || 0) + 1);
+        if (item?.status === "active") {
+          activeProjectCountByUser.set(userId, (activeProjectCountByUser.get(userId) || 0) + 1);
+        }
+      });
+    }
+
+    const users = Array.isArray(profiles)
+      ? profiles.map((profile) => {
+          const userId = String(profile?.id || "");
+          return {
+            id: userId,
+            email: String(profile?.email || ""),
+            username: String(profile?.username || ""),
+            creditsBalance: Number(profile?.credits_balance || 0),
+            projectCount: projectCountByUser.get(userId) || 0,
+            activeProjectCount: activeProjectCountByUser.get(userId) || 0,
+            createdAt: profile?.created_at || null,
+          };
+        })
+      : [];
+
+    return sendJson(res, 200, { users });
+  } catch (error) {
+    return sendJson(res, 500, { error: error?.message || "Unable to load users." });
+  }
+}
+
+async function handleAdminUserUpdate(req, res, userId) {
+  if (!isAdminAuthenticated(req)) {
+    return sendJson(res, 401, { error: "Unauthorized." });
+  }
+  if (!isLikelyUuid(userId)) {
+    return sendJson(res, 400, { error: "Invalid user id." });
+  }
+
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return sendJson(res, 500, { error: service.error });
+  }
+
+  const { config, headers } = service;
+
+  try {
+    const payload = await parseJsonBody(req);
+    const nextUsername = String(payload?.username || "").trim();
+    const hasUsername = typeof payload?.username === "string";
+    const hasCredits = payload?.creditsBalance != null && payload?.creditsBalance !== "";
+    const nextCreditsRaw = Number(payload?.creditsBalance);
+    const nextCredits = Number.isFinite(nextCreditsRaw) ? Math.max(0, Math.floor(nextCreditsRaw)) : NaN;
+
+    if (hasUsername && !nextUsername) {
+      return sendJson(res, 400, { error: "Username cannot be empty." });
+    }
+    if (hasUsername && nextUsername.length > 64) {
+      return sendJson(res, 400, { error: "Username is too long." });
+    }
+    if (hasCredits && !Number.isFinite(nextCredits)) {
+      return sendJson(res, 400, { error: "Credits value is invalid." });
+    }
+
+    const profileResponse = await fetch(
+      `${config.url}/rest/v1/profiles?select=id,email,username,credits_balance&id=eq.${encodeURIComponent(userId)}&limit=1`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+    if (!profileResponse.ok) {
+      const reason = await profileResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to read user profile.${reason ? ` ${reason}` : ""}` });
+    }
+    const profileRows = await profileResponse.json().catch(() => []);
+    const profile = Array.isArray(profileRows) ? profileRows[0] : null;
+    if (!profile) {
+      return sendJson(res, 404, { error: "User not found." });
+    }
+
+    const updates = {};
+    if (hasUsername && nextUsername !== String(profile?.username || "")) {
+      updates.username = nextUsername;
+    }
+    const currentCredits = Number(profile?.credits_balance || 0);
+    if (hasCredits && nextCredits !== currentCredits) {
+      updates.credits_balance = nextCredits;
+      const delta = nextCredits - currentCredits;
+      const ledgerResponse = await fetch(`${config.url}/rest/v1/credit_ledger`, {
+        method: "POST",
+        headers: {
+          ...headers,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify([
+          {
+            user_id: userId,
+            project_id: null,
+            delta,
+            reason: "admin_adjustment",
+            source: "admin_panel",
+            meta: {
+              previous: currentCredits,
+              next: nextCredits,
+            },
+          },
+        ]),
+      });
+      if (!ledgerResponse.ok) {
+        const reason = await ledgerResponse.text().catch(() => "");
+        return sendJson(res, 502, { error: `Unable to record credit adjustment.${reason ? ` ${reason}` : ""}` });
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      const patchResponse = await fetch(`${config.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: {
+          ...headers,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify(updates),
+      });
+      if (!patchResponse.ok) {
+        const reason = await patchResponse.text().catch(() => "");
+        return sendJson(res, 502, { error: `Unable to update user.${reason ? ` ${reason}` : ""}` });
+      }
+    }
+
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 400, { error: error?.message || "Invalid request." });
+  }
+}
+
+async function handleAdminUserDelete(req, res, userId) {
+  if (!isAdminAuthenticated(req)) {
+    return sendJson(res, 401, { error: "Unauthorized." });
+  }
+  if (!isLikelyUuid(userId)) {
+    return sendJson(res, 400, { error: "Invalid user id." });
+  }
+
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return sendJson(res, 500, { error: service.error });
+  }
+
+  const { config, headers } = service;
+
+  try {
+    const authDeleteResponse = await fetch(`${config.url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (!authDeleteResponse.ok) {
+      const reason = await authDeleteResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to delete auth user.${reason ? ` ${reason}` : ""}` });
+    }
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 500, { error: error?.message || "Unable to delete user." });
+  }
+}
+
 function handleSupabaseAuthBootstrap(req, res) {
   let raw = "";
   req.on("data", (chunk) => {
@@ -1183,11 +1435,15 @@ function serveStatic(req, res) {
 }
 
 function requestHandler(req, res) {
-  if (req.method === "GET" && req.url === "/api/recaptcha/site-key") {
+  const parsedUrl = new URL(req.url, "http://127.0.0.1");
+  const pathname = parsedUrl.pathname;
+  const adminUserPathMatch = /^\/api\/admin\/users\/([0-9a-f-]+)$/i.exec(pathname || "");
+
+  if (req.method === "GET" && pathname === "/api/recaptcha/site-key") {
     const { siteKey, action } = getRecaptchaConfig();
     return sendJson(res, 200, { siteKey, action });
   }
-  if (req.method === "GET" && req.url === "/api/auth/google") {
+  if (req.method === "GET" && pathname === "/api/auth/google") {
     const authUrl = getGoogleAuthStartUrl(req);
     if (!authUrl) {
       return sendJson(res, 500, {
@@ -1199,40 +1455,52 @@ function requestHandler(req, res) {
     res.end();
     return;
   }
-  if (req.method === "POST" && req.url === "/api/auth/bootstrap") {
+  if (req.method === "POST" && pathname === "/api/auth/bootstrap") {
     handleSupabaseAuthBootstrap(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/contact") {
+  if (req.method === "POST" && pathname === "/api/contact") {
     handleContactSubmit(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/admin/login") {
+  if (req.method === "POST" && pathname === "/api/admin/login") {
     handleAdminLogin(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/admin/logout") {
+  if (req.method === "POST" && pathname === "/api/admin/logout") {
     handleAdminLogout(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/image-edit") {
+  if (req.method === "GET" && pathname === "/api/admin/users") {
+    handleAdminUsersList(req, res);
+    return;
+  }
+  if (req.method === "PATCH" && adminUserPathMatch) {
+    handleAdminUserUpdate(req, res, adminUserPathMatch[1]);
+    return;
+  }
+  if (req.method === "DELETE" && adminUserPathMatch) {
+    handleAdminUserDelete(req, res, adminUserPathMatch[1]);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/image-edit") {
     handleNanoBananaEdit(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/image-generate") {
+  if (req.method === "POST" && pathname === "/api/image-generate") {
     handleNanoBananaGenerate(req, res);
     return;
   }
-  if (req.method === "POST" && req.url === "/api/peecho/print-order") {
+  if (req.method === "POST" && pathname === "/api/peecho/print-order") {
     handlePeechoPrintOrder(req, res);
     return;
   }
-  if (req.method === "GET" && req.url === "/api/peecho/framed-offerings") {
+  if (req.method === "GET" && pathname === "/api/peecho/framed-offerings") {
     handlePeechoFramedOfferings(req, res);
     return;
   }
-  if (req.method === "GET" && req.url.startsWith("/api/print-assets/")) {
-    const assetId = req.url.split("/api/print-assets/")[1]?.split("?")[0];
+  if (req.method === "GET" && pathname.startsWith("/api/print-assets/")) {
+    const assetId = pathname.split("/api/print-assets/")[1]?.split("?")[0];
     const asset = printAssets.get(assetId);
     if (!asset) {
       res.writeHead(404);
