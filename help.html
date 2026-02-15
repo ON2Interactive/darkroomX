@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Help - DarkroomX</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/darkroomx-favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="common-page">
+    <main class="common-shell">
+      <header class="landing-nav">
+        <a class="landing-brand" href="/" aria-label="DarkroomX Home">
+          <img src="/assets/darkroomx-logo-white.svg" alt="DarkroomX" class="landing-brand-logo" />
+        </a>
+        <nav class="landing-nav-links" aria-label="Primary">
+          <a href="/pricing">Pricing</a>
+          <a class="landing-cta-link" href="/studio">Try for Free</a>
+        </nav>
+      </header>
+
+      <section class="common-blank-section" aria-label="Help page content">
+        <div class="common-page-inner">
+          <h1>Help</h1>
+          <div class="legal-content">
+            <h2>Getting Started</h2>
+            <p>
+              New to DarkroomX? Start by creating your account on <a href="/signup">Sign Up</a>, then open the editor
+              and begin a new session.
+            </p>
+            <ul>
+              <li>Upload your image(s)</li>
+              <li>Apply manual or AI-powered edits</li>
+              <li>Generate variations if needed</li>
+              <li>Export your final result</li>
+            </ul>
+
+            <h2>Core Workflow</h2>
+            <p>
+              DarkroomX is built around session-based editing. Each session is a focused workspace for one job, shoot,
+              or concept, without the overhead of traditional catalog management.
+            </p>
+
+            <h2>Using AI Edits</h2>
+            <p>
+              In the editor, describe your intended change clearly using natural language. The more specific your prompt,
+              the more predictable your result.
+            </p>
+            <ul>
+              <li>State the subject and desired change directly</li>
+              <li>Include style, tone, or lighting intent when relevant</li>
+              <li>Generate multiple attempts for best selection</li>
+            </ul>
+
+            <h2>Credits & Billing Help</h2>
+            <p>
+              DarkroomX uses a credit-based model. If you need more credits, visit <a href="/pricing">Pricing</a> and
+              choose the pack that fits your workflow.
+            </p>
+            <p>
+              For billing or purchase issues, please reach out through <a href="/contact">Contact</a>.
+            </p>
+
+            <h2>Export Help</h2>
+            <p>
+              If an export fails, try reducing file complexity, refreshing the session, and exporting again. If the
+              issue persists, contact support with a short description of what happened.
+            </p>
+
+            <h2>Performance Tips</h2>
+            <ul>
+              <li>Use a modern browser and keep it updated</li>
+              <li>Close unused tabs during heavy editing sessions</li>
+              <li>Use stable internet for AI generation tasks</li>
+            </ul>
+
+            <h2>Account & Access</h2>
+            <p>
+              Account access uses Google sign-in. If you can’t access your account, first retry from
+              <a href="/signup">Sign Up</a>, then contact us if the issue continues.
+            </p>
+
+            <h2>Data & Privacy</h2>
+            <p>
+              For details on how uploaded images and account information are handled, please review our
+              <a href="/privacy">Privacy Policy</a>.
+            </p>
+
+            <h2>Still Need Help?</h2>
+            <p>
+              If you still need assistance, go to <a href="/contact">Contact</a> and include:
+            </p>
+            <ul>
+              <li>What you were trying to do</li>
+              <li>What happened instead</li>
+              <li>Your browser and device</li>
+              <li>Screenshots if available</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <footer class="landing-footer" aria-label="DarkroomX footer">
+        <div class="landing-footer-inner">
+          <div class="landing-footer-top">
+            <a class="landing-footer-logo-link" href="/" aria-label="DarkroomX Home">
+              <img src="/assets/darkroomx-logo-white.svg" alt="DarkroomX" class="landing-footer-logo" />
+            </a>
+            <nav class="landing-footer-links" aria-label="Footer">
+              <a href="/studio">Editor</a>
+              <a href="/signup">Sign Up</a>
+              <a href="/pricing">Pricing</a>
+              <a href="/faqs">FAQs</a>
+              <a href="/help">Help</a>
+              <a href="/contact">Contact</a>
+              <a href="/privacy">Privacy</a>
+              <a href="/terms">Terms</a>
+            </nav>
+          </div>
+          <div class="landing-footer-bottom">
+            <p>© <span id="footerYear"></span> DarkroomX. All rights reserved.</p>
+          </div>
+        </div>
+      </footer>
+    </main>
+    <script>
+      (() => {
+        const nav = document.querySelector(".landing-nav");
+        if (!nav) return;
+
+        let lastScrollY = window.scrollY || 0;
+        const delta = 8;
+        const topRevealThreshold = 80;
+
+        const onScroll = () => {
+          const currentY = window.scrollY || 0;
+          const diff = currentY - lastScrollY;
+
+          if (currentY <= topRevealThreshold) {
+            nav.classList.remove("is-hidden");
+            lastScrollY = currentY;
+            return;
+          }
+
+          if (Math.abs(diff) < delta) return;
+
+          if (diff > 0) {
+            nav.classList.add("is-hidden");
+          } else {
+            nav.classList.remove("is-hidden");
+          }
+
+          lastScrollY = currentY;
+        };
+
+        window.addEventListener("scroll", onScroll, { passive: true });
+
+        const footerYear = document.getElementById("footerYear");
+        if (footerYear) {
+          footerYear.textContent = String(new Date().getFullYear());
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -136,6 +136,196 @@ function getPeechoSecretHash(orderId) {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
+function getGoogleAuthStartUrl(req) {
+  const explicitStartUrl = normalizeEnvValue(process.env.GOOGLE_AUTH_START_URL || process.env.GOOGLE_OAUTH_START_URL || "");
+  if (isValidHttpUrl(explicitStartUrl)) return explicitStartUrl;
+
+  const clientId = normalizeEnvValue(process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "");
+  const redirectUri = normalizeEnvValue(process.env.GOOGLE_OAUTH_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || "");
+  if (!clientId || !redirectUri) return "";
+
+  const scope = normalizeEnvValue(process.env.GOOGLE_OAUTH_SCOPE || "openid email profile");
+  const state =
+    normalizeEnvValue(process.env.GOOGLE_OAUTH_STATE) ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope,
+    access_type: "offline",
+    include_granted_scopes: "true",
+    prompt: "select_account",
+    state,
+  });
+
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
+function isValidEmailAddress(value) {
+  const email = String(value || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getRecaptchaConfig() {
+  const siteKey = normalizeEnvValue(process.env.RECAPTCHA_SITE_KEY || "");
+  const secretKey = normalizeEnvValue(process.env.RECAPTCHA_SECRET_KEY || "");
+  const action = normalizeEnvValue(process.env.RECAPTCHA_ACTION || "contact_submit");
+  const minScoreRaw = Number(process.env.RECAPTCHA_MIN_SCORE || "0.5");
+  const minScore = Number.isFinite(minScoreRaw) ? Math.max(0, Math.min(1, minScoreRaw)) : 0.5;
+  return { siteKey, secretKey, action, minScore };
+}
+
+async function verifyRecaptchaToken(token, remoteIp) {
+  const { secretKey, action, minScore } = getRecaptchaConfig();
+  if (!secretKey) {
+    return { ok: true, configured: false };
+  }
+  if (!token) {
+    return { ok: false, status: 400, error: "Missing reCAPTCHA token." };
+  }
+
+  const body = new URLSearchParams();
+  body.set("secret", secretKey);
+  body.set("response", token);
+  if (remoteIp) body.set("remoteip", remoteIp);
+
+  let payload = null;
+  try {
+    const response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return { ok: false, status: 502, error: "reCAPTCHA verification failed." };
+    }
+  } catch {
+    return { ok: false, status: 502, error: "Unable to verify reCAPTCHA." };
+  }
+
+  const success = Boolean(payload?.success);
+  const score = Number(payload?.score ?? 0);
+  const receivedAction = String(payload?.action || "");
+  if (!success) {
+    return { ok: false, status: 400, error: "reCAPTCHA challenge failed." };
+  }
+  if (receivedAction !== action) {
+    return { ok: false, status: 400, error: "Invalid reCAPTCHA action." };
+  }
+  if (!Number.isFinite(score) || score < minScore) {
+    return { ok: false, status: 400, error: "reCAPTCHA score too low." };
+  }
+  return { ok: true, configured: true };
+}
+
+async function sendContactEmail({ name, email, subject, message }) {
+  const sendgridApiKey = normalizeEnvValue(process.env.SENDGRID_API_KEY || "");
+  const toEmail = normalizeEnvValue(process.env.CONTACT_TO_EMAIL || "hello@darkroomx.com");
+  const fromEmail = normalizeEnvValue(process.env.CONTACT_FROM_EMAIL || "");
+  if (!sendgridApiKey || !fromEmail) {
+    return { ok: false, status: 500, error: "Contact email is not configured. Set SENDGRID_API_KEY and CONTACT_FROM_EMAIL." };
+  }
+
+  const textBody = [
+    "New DarkroomX contact form submission",
+    "",
+    `Name: ${name}`,
+    `Email: ${email}`,
+    `Subject: ${subject}`,
+    "",
+    "Message:",
+    message,
+  ].join("\n");
+
+  const htmlBody = `
+    <h2>New DarkroomX contact form submission</h2>
+    <p><strong>Name:</strong> ${String(name).replace(/[<>&"]/g, "")}</p>
+    <p><strong>Email:</strong> ${String(email).replace(/[<>&"]/g, "")}</p>
+    <p><strong>Subject:</strong> ${String(subject).replace(/[<>&"]/g, "")}</p>
+    <p><strong>Message:</strong></p>
+    <p>${String(message).replace(/[<>&"]/g, "").replace(/\n/g, "<br />")}</p>
+  `;
+
+  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sendgridApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: toEmail }], subject: `[DarkroomX Contact] ${subject}` }],
+      from: { email: fromEmail, name: "DarkroomX Contact Form" },
+      reply_to: { email, name },
+      content: [
+        { type: "text/plain", value: textBody },
+        { type: "text/html", value: htmlBody },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    let errorText = "";
+    try {
+      errorText = await response.text();
+    } catch {
+      errorText = "";
+    }
+    return { ok: false, status: response.status || 502, error: errorText || "Failed to send contact email." };
+  }
+  return { ok: true };
+}
+
+function handleContactSubmit(req, res) {
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 256 * 1024) {
+      req.destroy();
+    }
+  });
+
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(raw || "{}");
+      const name = String(payload?.name || "").trim();
+      const email = String(payload?.email || "").trim();
+      const subject = String(payload?.subject || "").trim();
+      const message = String(payload?.message || "").trim();
+      const company = String(payload?.company || "").trim();
+      const recaptchaToken = String(payload?.recaptchaToken || "").trim();
+
+      if (company) {
+        return sendJson(res, 200, { ok: true });
+      }
+      if (!name || !email || !subject || !message) {
+        return sendJson(res, 400, { error: "Missing required fields." });
+      }
+      if (!isValidEmailAddress(email)) {
+        return sendJson(res, 400, { error: "Invalid email address." });
+      }
+      if (name.length > 120 || email.length > 180 || subject.length > 160 || message.length > 4000) {
+        return sendJson(res, 400, { error: "Input is too long." });
+      }
+
+      const recaptcha = await verifyRecaptchaToken(recaptchaToken, req.socket?.remoteAddress || "");
+      if (!recaptcha.ok) {
+        return sendJson(res, recaptcha.status || 400, { error: "Unable to verify request." });
+      }
+
+      const result = await sendContactEmail({ name, email, subject, message });
+      if (!result.ok) {
+        return sendJson(res, result.status || 502, { error: result.error || "Failed to send message." });
+      }
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 500, { error: error?.message || "Unexpected contact form error." });
+    }
+  });
+}
+
 function getFramedOfferingsConfig() {
   const raw = process.env.PEECHO_FRAMED_OFFERINGS_JSON || "[]";
   try {
@@ -572,7 +762,28 @@ function handlePeechoFramedOfferings(_req, res) {
 
 function serveStatic(req, res) {
   const rawPath = decodeURIComponent(req.url.split("?")[0] || "/");
-  const reqPath = rawPath === "/" ? "/index.html" : rawPath === "/studio" ? "/studio.html" : rawPath;
+  const reqPath =
+    rawPath === "/"
+      ? "/index.html"
+      : rawPath === "/studio"
+        ? "/studio.html"
+        : rawPath === "/signup"
+          ? "/signup.html"
+          : rawPath === "/faqs"
+            ? "/faqs.html"
+            : rawPath === "/help"
+              ? "/help.html"
+              : rawPath === "/contact"
+                ? "/contact.html"
+                : rawPath === "/404"
+                  ? "/404.html"
+                  : rawPath === "/privacy"
+                    ? "/privacy.html"
+                    : rawPath === "/terms"
+                      ? "/terms.html"
+                      : rawPath === "/pricing"
+                        ? "/pricing.html"
+              : rawPath;
   const safePath = path.normalize(path.join(ROOT, reqPath));
   if (!safePath.startsWith(ROOT)) {
     res.writeHead(403);
@@ -582,8 +793,19 @@ function serveStatic(req, res) {
 
   fs.readFile(safePath, (err, data) => {
     if (err) {
-      res.writeHead(404);
-      res.end("Not Found");
+      const fallbackPath = path.join(ROOT, "404.html");
+      fs.readFile(fallbackPath, (fallbackErr, fallbackData) => {
+        if (fallbackErr) {
+          res.writeHead(404);
+          res.end("Not Found");
+          return;
+        }
+        res.writeHead(404, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(fallbackData);
+      });
       return;
     }
 
@@ -597,6 +819,26 @@ function serveStatic(req, res) {
 }
 
 function requestHandler(req, res) {
+  if (req.method === "GET" && req.url === "/api/recaptcha/site-key") {
+    const { siteKey, action } = getRecaptchaConfig();
+    return sendJson(res, 200, { siteKey, action });
+  }
+  if (req.method === "GET" && req.url === "/api/auth/google") {
+    const authUrl = getGoogleAuthStartUrl(req);
+    if (!authUrl) {
+      return sendJson(res, 500, {
+        error:
+          "Google OAuth is not configured. Set GOOGLE_AUTH_START_URL (or GOOGLE_OAUTH_START_URL), or set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_REDIRECT_URI.",
+      });
+    }
+    res.writeHead(302, { Location: authUrl, "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+  if (req.method === "POST" && req.url === "/api/contact") {
+    handleContactSubmit(req, res);
+    return;
+  }
   if (req.method === "POST" && req.url === "/api/image-edit") {
     handleNanoBananaEdit(req, res);
     return;
