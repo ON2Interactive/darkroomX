@@ -1366,9 +1366,15 @@ function handleSupabaseAuthBootstrap(req, res) {
         return sendJson(res, bootstrapResult.status || 500, { error: bootstrapResult.error || "Unable to bootstrap user." });
       }
 
+      let redirectTo = "/studio";
+      const subscriptionAccess = await ensureUserHasActiveSubscription(req, supabaseUserResult.user);
+      if (subscriptionAccess.ok && subscriptionAccess.enforced && !subscriptionAccess.active) {
+        redirectTo = "/pricing";
+      }
+
       return sendJson(res, 200, {
         ok: true,
-        redirectTo: "/studio",
+        redirectTo,
         profile: bootstrapResult.profile,
         activeProject: bootstrapResult.activeProject,
       });
