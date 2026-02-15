@@ -2275,6 +2275,12 @@ body {
   width: min(520px, calc(100vw - 32px));
 }
 
+.credits-modal-body {
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+}
+
 .credits-modal-copy {
   margin: 0;
   color: rgba(255, 255, 255, 0.88);
@@ -2290,6 +2296,9 @@ body {
 
 .modal-text-btn {
   height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   background: transparent;
@@ -2303,6 +2312,7 @@ body {
 .modal-text-btn-primary {
   border-color: rgba(255, 255, 255, 0.34);
   background: rgba(255, 255, 255, 0.08);
+  width: 240px;
 }
 
 .interaction-locked {

@@ -88,10 +88,9 @@ const printCancelBtn = document.getElementById("printCancelBtn");
 const printSubmitBtn = document.getElementById("printSubmitBtn");
 const printModalStatus = document.getElementById("printModalStatus");
 const creditsModal = document.getElementById("creditsModal");
+const creditsModalTitle = document.getElementById("creditsModalTitle");
 const creditsModalCloseBtn = document.getElementById("creditsModalCloseBtn");
-const creditsModalCancelBtn = document.getElementById("creditsModalCancelBtn");
 const creditsModalBuyBtn = document.getElementById("creditsModalBuyBtn");
-const creditsModalMessage = document.getElementById("creditsModalMessage");
 const printOfferingSelect = document.getElementById("printOfferingSelect");
 const printQuantityInput = document.getElementById("printQuantityInput");
 const printCurrencyInput = document.getElementById("printCurrencyInput");
@@ -1914,16 +1913,9 @@ const closePrintModal = () => {
 };
 
 const openCreditsModal = ({ depleted = false, context = "status" } = {}) => {
-  if (!creditsModal || !creditsModalMessage) return;
+  if (!creditsModal || !creditsModalTitle) return;
   const balance = creditsService.getBalance();
-  if (depleted) {
-    creditsModalMessage.textContent =
-      context === "action"
-        ? "You are out of credits for this action."
-        : "You are out of credits.";
-  } else {
-    creditsModalMessage.textContent = `You have ${balance} credits left.`;
-  }
+  creditsModalTitle.textContent = `Credits ${balance}`;
   creditsModalBuyBtn.style.display = "inline-flex";
   creditsModal.classList.remove("hidden-panel");
   hydrateIcons();
@@ -3696,7 +3688,6 @@ printModal.addEventListener("pointerdown", (event) => {
 });
 
 creditsModalCloseBtn?.addEventListener("click", closeCreditsModal);
-creditsModalCancelBtn?.addEventListener("click", closeCreditsModal);
 creditsModalBuyBtn?.addEventListener("click", () => {
   window.location.href = "/pricing";
 });
