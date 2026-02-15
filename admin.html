@@ -52,6 +52,23 @@
           statusEl.textContent = String(message || "");
         };
 
+        const syncLocalUserCacheIfCurrentUser = (userId, username, creditsBalance) => {
+          try {
+            const rawProfile = window.localStorage.getItem("darkroomx_profile");
+            if (!rawProfile) return;
+            const profile = JSON.parse(rawProfile);
+            if (!profile || String(profile.id || "") !== String(userId || "")) return;
+            const nextCredits = Number(creditsBalance);
+            if (!Number.isFinite(nextCredits) || nextCredits < 0) return;
+            profile.username = String(username || profile.username || "");
+            profile.creditsBalance = Math.floor(nextCredits);
+            window.localStorage.setItem("darkroomx_profile", JSON.stringify(profile));
+            window.localStorage.setItem("darkroomx_credits", String(Math.floor(nextCredits)));
+          } catch {
+            // Ignore local storage parse failures.
+          }
+        };
+
         const escapeHtml = (value) =>
           String(value == null ? "" : value)
             .replace(/&/g, "&amp;")
@@ -150,6 +167,7 @@
               setStatus(payload?.error || "Failed to save user.");
               return;
             }
+            syncLocalUserCacheIfCurrentUser(userId, username, creditsBalance);
             setStatus("User updated.");
             setTimeout(() => {
               if (statusEl.textContent === "User updated.") setStatus("");
