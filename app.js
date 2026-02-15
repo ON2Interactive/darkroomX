@@ -1924,7 +1924,7 @@ const openCreditsModal = ({ depleted = false, context = "status" } = {}) => {
   } else {
     creditsModalMessage.textContent = `You have ${balance} credits left.`;
   }
-  creditsModalBuyBtn.style.display = depleted ? "inline-flex" : "inline-flex";
+  creditsModalBuyBtn.style.display = "inline-flex";
   creditsModal.classList.remove("hidden-panel");
   hydrateIcons();
 };
