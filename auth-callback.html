@@ -55,6 +55,10 @@
             window.localStorage.setItem("darkroomx_auth_token", accessToken);
             if (payload?.profile) {
               window.localStorage.setItem("darkroomx_profile", JSON.stringify(payload.profile));
+              const profileCredits = Number(payload?.profile?.creditsBalance);
+              if (Number.isFinite(profileCredits) && profileCredits >= 0) {
+                window.localStorage.setItem("darkroomx_credits", String(Math.floor(profileCredits)));
+              }
             }
             if (payload?.activeProject?.id) {
               window.localStorage.setItem("darkroomx_active_project_id", payload.activeProject.id);

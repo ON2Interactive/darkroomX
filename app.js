@@ -170,6 +170,7 @@ const LAYER_SHAPE_PREFIX = "shape:";
 const SNAP_THRESHOLD_PX = 8;
 const DEFAULT_CREDITS = 1000;
 const CREDITS_STORAGE_KEY = "darkroomx_credits";
+const PROFILE_STORAGE_KEY = "darkroomx_profile";
 const CREDIT_COSTS = {
   export: 10,
   generate: 10,
@@ -447,6 +448,16 @@ const syncWorkspacePanCursor = () => {
 
 const loadCredits = () => {
   try {
+    const rawProfile = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (rawProfile) {
+      const profile = JSON.parse(rawProfile);
+      const profileCredits = Number(profile?.creditsBalance);
+      if (Number.isFinite(profileCredits) && profileCredits >= 0) {
+        state.credits = Math.floor(profileCredits);
+        return;
+      }
+    }
+
     const raw = window.localStorage.getItem(CREDITS_STORAGE_KEY);
     if (raw == null || raw === "") {
       state.credits = DEFAULT_CREDITS;
