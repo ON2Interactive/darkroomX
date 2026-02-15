@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin - DarkroomX</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/darkroomx-favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="common-page">
+    <main class="common-shell">
+      <section class="common-blank-section" aria-label="Admin page">
+        <div class="common-page-inner">
+          <div class="admin-topbar">
+            <h1>Admin</h1>
+            <button id="adminLogoutBtn" type="button" class="contact-submit-btn admin-logout-btn">Log Out</button>
+          </div>
+          <div class="admin-placeholder">
+            <p>Users table placeholder (Supabase integration next).</p>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const logoutBtn = document.getElementById("adminLogoutBtn");
+        if (!logoutBtn) return;
+        logoutBtn.addEventListener("click", async () => {
+          logoutBtn.disabled = true;
+          try {
+            await fetch("/api/admin/logout", { method: "POST" });
+          } catch {}
+          window.location.href = "/adminlogin";
+        });
+      })();
+    </script>
+  </body>
+</html>

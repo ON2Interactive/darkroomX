@@ -220,6 +220,33 @@ body {
   pointer-events: none;
 }
 
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.admin-logout-btn {
+  width: auto;
+  min-width: 120px;
+  padding: 0 14px;
+}
+
+.admin-placeholder {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  min-height: 420px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.admin-placeholder p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.95rem;
+}
+
 .landing-nav {
   position: fixed;
   inset: 0 0 auto 0;

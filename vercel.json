@@ -46,6 +46,14 @@
       "use": "@vercel/static"
     },
     {
+      "src": "adminlogin.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "admin.html",
+      "use": "@vercel/static"
+    },
+    {
       "src": "app.js",
       "use": "@vercel/static"
     },
@@ -104,7 +112,15 @@
       "dest": "/pricing.html"
     },
     {
-      "src": "/(app\\.js|styles\\.css|studio\\.html|signup\\.html|faqs\\.html|help\\.html|contact\\.html|404\\.html|privacy\\.html|terms\\.html|pricing\\.html|favicon\\.ico|.*\\.(png|jpg|jpeg|svg|webp|gif))",
+      "src": "/adminlogin",
+      "dest": "/adminlogin.html"
+    },
+    {
+      "src": "/admin",
+      "dest": "/admin.html"
+    },
+    {
+      "src": "/(app\\.js|styles\\.css|studio\\.html|signup\\.html|faqs\\.html|help\\.html|contact\\.html|404\\.html|privacy\\.html|terms\\.html|pricing\\.html|adminlogin\\.html|admin\\.html|favicon\\.ico|.*\\.(png|jpg|jpeg|svg|webp|gif))",
       "dest": "/$1"
     },
     {

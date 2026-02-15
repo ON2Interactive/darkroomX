@@ -177,6 +177,87 @@ function getRecaptchaConfig() {
   return { siteKey, secretKey, action, minScore };
 }
 
+function getAdminAuthConfig() {
+  return {
+    email: normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || ""),
+    password: normalizeEnvValue(process.env.ADMIN_LOGIN_PASSWORD || ""),
+    secret: normalizeEnvValue(process.env.ADMIN_AUTH_SECRET || "darkroomx-admin-secret"),
+    cookieName: "drx_admin_auth",
+  };
+}
+
+function parseCookies(req) {
+  const header = String(req.headers.cookie || "");
+  if (!header) return {};
+  return header.split(";").reduce((acc, part) => {
+    const idx = part.indexOf("=");
+    if (idx <= 0) return acc;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    acc[key] = decodeURIComponent(value);
+    return acc;
+  }, {});
+}
+
+function buildAdminSessionToken() {
+  const { email, password, secret } = getAdminAuthConfig();
+  return crypto.createHash("sha256").update(`${email}|${password}|${secret}`).digest("hex");
+}
+
+function isAdminAuthenticated(req) {
+  const { cookieName, email, password } = getAdminAuthConfig();
+  if (!email || !password) return false;
+  const cookies = parseCookies(req);
+  return cookies[cookieName] === buildAdminSessionToken();
+}
+
+function setAdminAuthCookie(res) {
+  const { cookieName } = getAdminAuthConfig();
+  const token = buildAdminSessionToken();
+  const isLocal = String(process.env.NODE_ENV || "").toLowerCase() !== "production";
+  const secureFlag = isLocal ? "" : "; Secure";
+  res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secureFlag}`);
+}
+
+function clearAdminAuthCookie(res) {
+  const { cookieName } = getAdminAuthConfig();
+  res.setHeader("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+function handleAdminLogin(req, res) {
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+
+  req.on("end", () => {
+    try {
+      const payload = JSON.parse(raw || "{}");
+      const email = String(payload?.email || "").trim();
+      const password = String(payload?.password || "");
+      const config = getAdminAuthConfig();
+
+      if (!config.email || !config.password) {
+        return sendJson(res, 500, { error: "Admin login is not configured." });
+      }
+      if (email !== config.email || password !== config.password) {
+        return sendJson(res, 401, { error: "Invalid credentials." });
+      }
+
+      setAdminAuthCookie(res);
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+    }
+  });
+}
+
+function handleAdminLogout(_req, res) {
+  clearAdminAuthCookie(res);
+  return sendJson(res, 200, { ok: true });
+}
+
 async function verifyRecaptchaToken(token, remoteIp) {
   const { secretKey, action, minScore } = getRecaptchaConfig();
   if (!secretKey) {
@@ -762,6 +843,17 @@ function handlePeechoFramedOfferings(_req, res) {
 
 function serveStatic(req, res) {
   const rawPath = decodeURIComponent(req.url.split("?")[0] || "/");
+  if (rawPath === "/admin" && !isAdminAuthenticated(req)) {
+    res.writeHead(302, { Location: "/adminlogin", "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+  if (rawPath === "/adminlogin" && isAdminAuthenticated(req)) {
+    res.writeHead(302, { Location: "/admin", "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+
   const reqPath =
     rawPath === "/"
       ? "/index.html"
@@ -783,6 +875,10 @@ function serveStatic(req, res) {
                       ? "/terms.html"
                       : rawPath === "/pricing"
                         ? "/pricing.html"
+                        : rawPath === "/adminlogin"
+                          ? "/adminlogin.html"
+                          : rawPath === "/admin"
+                            ? "/admin.html"
               : rawPath;
   const safePath = path.normalize(path.join(ROOT, reqPath));
   if (!safePath.startsWith(ROOT)) {
@@ -837,6 +933,14 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && req.url === "/api/contact") {
     handleContactSubmit(req, res);
+    return;
+  }
+  if (req.method === "POST" && req.url === "/api/admin/login") {
+    handleAdminLogin(req, res);
+    return;
+  }
+  if (req.method === "POST" && req.url === "/api/admin/logout") {
+    handleAdminLogout(req, res);
     return;
   }
   if (req.method === "POST" && req.url === "/api/image-edit") {
