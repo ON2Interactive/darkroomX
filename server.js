@@ -752,6 +752,93 @@ async function handleAdminUserDelete(req, res, userId) {
   }
 }
 
+async function handleAdminUserEmail(req, res) {
+  if (!isAdminAuthenticated(req)) {
+    return sendJson(res, 401, { error: "Unauthorized." });
+  }
+
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return sendJson(res, 500, { error: service.error });
+  }
+
+  const { config, headers } = service;
+
+  try {
+    const payload = await parseJsonBody(req);
+    const userId = String(payload?.userId || "").trim();
+    const toEmail = String(payload?.email || "").trim().toLowerCase();
+    const subject = String(payload?.subject || "").trim();
+    const message = String(payload?.message || "").trim();
+    const userName = String(payload?.name || "").trim();
+
+    if (!isLikelyUuid(userId)) {
+      return sendJson(res, 400, { error: "Invalid user id." });
+    }
+    if (!subject || !message) {
+      return sendJson(res, 400, { error: "Subject and message are required." });
+    }
+    if (subject.length > 180 || message.length > 8000 || userName.length > 120) {
+      return sendJson(res, 400, { error: "Input is too long." });
+    }
+
+    const profileResponse = await fetch(
+      `${config.url}/rest/v1/profiles?select=id,email,username&id=eq.${encodeURIComponent(userId)}&limit=1`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+    if (!profileResponse.ok) {
+      const reason = await profileResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to read user profile.${reason ? ` ${reason}` : ""}` });
+    }
+    const profileRows = await profileResponse.json().catch(() => []);
+    const profile = Array.isArray(profileRows) ? profileRows[0] : null;
+    if (!profile) {
+      return sendJson(res, 404, { error: "User not found." });
+    }
+
+    const profileEmail = String(profile?.email || "").trim().toLowerCase();
+    if (!profileEmail || !isValidEmailAddress(profileEmail)) {
+      return sendJson(res, 400, { error: "User email is invalid." });
+    }
+    if (toEmail && toEmail !== profileEmail) {
+      return sendJson(res, 400, { error: "Email must match the selected user." });
+    }
+
+    const sendgridApiKey = normalizeEnvValue(process.env.SENDGRID_API_KEY || "");
+    const fromEmail = normalizeEnvValue(process.env.CONTACT_FROM_EMAIL || "");
+    if (!sendgridApiKey || !fromEmail) {
+      return sendJson(res, 500, { error: "Email is not configured. Set SENDGRID_API_KEY and CONTACT_FROM_EMAIL." });
+    }
+
+    const safeName = userName || String(profile?.username || "").trim() || "there";
+    const textBody = [`Hi ${safeName},`, "", message, "", "The DarkroomX Team"].join("\n");
+    const htmlBody = `
+      <p>Hi ${String(safeName).replace(/[<>&"]/g, "")},</p>
+      <p>${String(message).replace(/[<>&"]/g, "").replace(/\n/g, "<br />")}</p>
+      <p>The DarkroomX Team</p>
+    `;
+
+    const sendResult = await sendSendgridMail({
+      sendgridApiKey,
+      fromEmail,
+      toEmail: profileEmail,
+      subject,
+      textBody,
+      htmlBody,
+    });
+    if (!sendResult.ok) {
+      return sendJson(res, sendResult.status || 502, { error: sendResult.error || "Failed to send email." });
+    }
+
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 400, { error: error?.message || "Invalid request." });
+  }
+}
+
 function handleSupabaseAuthBootstrap(req, res) {
   let raw = "";
   req.on("data", (chunk) => {
@@ -1591,6 +1678,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "DELETE" && adminUserPathMatch) {
     handleAdminUserDelete(req, res, adminUserPathMatch[1]);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/admin/email") {
+    handleAdminUserEmail(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/image-edit") {

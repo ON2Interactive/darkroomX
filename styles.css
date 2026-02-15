@@ -308,7 +308,7 @@ body {
 }
 
 .admin-col-actions {
-  width: 140px;
+  width: 190px;
 }
 
 .admin-cell-email {
@@ -338,6 +338,7 @@ body {
 }
 
 .admin-row-save-btn,
+.admin-row-email-btn,
 .admin-row-delete-btn {
   height: 34px;
   border-radius: 6px;
@@ -352,6 +353,13 @@ body {
   padding: 0 10px;
 }
 
+.admin-row-email-btn {
+  width: 34px;
+  padding: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .admin-row-delete-btn {
   width: 34px;
   padding: 0;
@@ -362,6 +370,111 @@ body {
 .admin-empty-cell {
   color: rgba(255, 255, 255, 0.64);
   text-align: center;
+}
+
+.admin-email-modal[hidden] {
+  display: none;
+}
+
+.admin-email-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.admin-email-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+}
+
+.admin-email-dialog {
+  position: relative;
+  width: min(700px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a1a1a 0%, #131313 100%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+.admin-email-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.admin-email-dialog-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.admin-email-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+}
+
+.admin-email-dialog-body {
+  padding: 16px;
+}
+
+.admin-email-form {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-email-form label {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.86rem;
+}
+
+.admin-email-form input,
+.admin-email-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+}
+
+.admin-email-form input {
+  height: 40px;
+  padding: 0 12px;
+}
+
+.admin-email-form textarea {
+  min-height: 220px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.admin-email-form input[readonly] {
+  opacity: 0.95;
+}
+
+.admin-email-status {
+  margin: 2px 0 0;
+  min-height: 18px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.88rem;
+}
+
+.admin-email-send-btn {
+  width: 180px;
+  margin-top: 2px;
 }
 
 .landing-nav {

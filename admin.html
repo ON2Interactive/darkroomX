@@ -40,13 +40,90 @@
         </div>
       </section>
     </main>
+    <div id="adminEmailModal" class="admin-email-modal" hidden>
+      <div id="adminEmailModalBackdrop" class="admin-email-modal-backdrop"></div>
+      <section class="admin-email-dialog" role="dialog" aria-modal="true" aria-labelledby="adminEmailDialogTitle">
+        <header class="admin-email-dialog-head">
+          <h2 id="adminEmailDialogTitle">Send Email</h2>
+          <button id="adminEmailCloseBtn" type="button" class="admin-email-close-btn" aria-label="Close">✕</button>
+        </header>
+        <div class="admin-email-dialog-body">
+          <form id="adminEmailForm" class="admin-email-form">
+            <label for="adminEmailTo">To</label>
+            <input id="adminEmailTo" type="email" readonly />
+            <label for="adminEmailSubject">Subject</label>
+            <input id="adminEmailSubject" type="text" maxlength="180" required />
+            <label for="adminEmailMessage">Message</label>
+            <textarea id="adminEmailMessage" rows="10" maxlength="8000" required></textarea>
+            <p id="adminEmailStatus" class="admin-email-status" aria-live="polite"></p>
+            <button id="adminEmailSendBtn" type="submit" class="contact-submit-btn admin-email-send-btn">Send Email</button>
+          </form>
+        </div>
+      </section>
+    </div>
     <script>
       (() => {
         const logoutBtn = document.getElementById("adminLogoutBtn");
         const refreshBtn = document.getElementById("adminRefreshBtn");
         const statusEl = document.getElementById("adminUsersStatus");
         const usersBody = document.getElementById("adminUsersBody");
-        if (!logoutBtn || !refreshBtn || !statusEl || !usersBody) return;
+        const emailModal = document.getElementById("adminEmailModal");
+        const emailModalBackdrop = document.getElementById("adminEmailModalBackdrop");
+        const emailCloseBtn = document.getElementById("adminEmailCloseBtn");
+        const emailForm = document.getElementById("adminEmailForm");
+        const emailToInput = document.getElementById("adminEmailTo");
+        const emailSubjectInput = document.getElementById("adminEmailSubject");
+        const emailMessageInput = document.getElementById("adminEmailMessage");
+        const emailStatusEl = document.getElementById("adminEmailStatus");
+        const emailSendBtn = document.getElementById("adminEmailSendBtn");
+        if (
+          !logoutBtn ||
+          !refreshBtn ||
+          !statusEl ||
+          !usersBody ||
+          !emailModal ||
+          !emailModalBackdrop ||
+          !emailCloseBtn ||
+          !emailForm ||
+          !emailToInput ||
+          !emailSubjectInput ||
+          !emailMessageInput ||
+          !emailStatusEl ||
+          !emailSendBtn
+        ) {
+          return;
+        }
+
+        let activeEmailUserId = "";
+        let activeEmailUserName = "";
+
+        const setEmailStatus = (message) => {
+          emailStatusEl.textContent = String(message || "");
+        };
+
+        const closeEmailModal = () => {
+          emailModal.hidden = true;
+          activeEmailUserId = "";
+          activeEmailUserName = "";
+          setEmailStatus("");
+          emailForm.reset();
+          emailToInput.value = "";
+        };
+
+        const openEmailModal = (row) => {
+          const userId = String(row?.dataset?.userId || "");
+          const userEmail = String(row?.dataset?.userEmail || "");
+          const userName = String(row?.dataset?.userName || "").trim();
+          if (!userId || !userEmail) return;
+          activeEmailUserId = userId;
+          activeEmailUserName = userName;
+          emailToInput.value = userEmail;
+          emailSubjectInput.value = "DarkroomX Update";
+          emailMessageInput.value = userName ? `Hi ${userName},\n\n` : "";
+          setEmailStatus("");
+          emailModal.hidden = false;
+          emailSubjectInput.focus();
+        };
 
         const setStatus = (message) => {
           statusEl.textContent = String(message || "");
@@ -93,7 +170,7 @@
           usersBody.innerHTML = users
             .map(
               (user) => `
-                <tr data-user-id="${escapeHtml(user.id)}">
+                <tr data-user-id="${escapeHtml(user.id)}" data-user-email="${escapeHtml(user.email || "")}" data-user-name="${escapeHtml(user.username || "")}">
                   <td class="admin-cell-email">${escapeHtml(user.email || "")}</td>
                   <td>
                     <input class="admin-cell-input" type="text" data-field="username" value="${escapeHtml(user.username || "")}" />
@@ -104,6 +181,7 @@
                   <td>${Number(user.activeProjectCount || 0)} active / ${Number(user.projectCount || 0)} total</td>
                   <td>${escapeHtml(formatDate(user.createdAt))}</td>
                   <td class="admin-actions-cell">
+                    <button type="button" class="admin-row-email-btn" data-action="email" title="Email user" aria-label="Email user">✉</button>
                     <button type="button" class="admin-row-save-btn" data-action="save">Save</button>
                     <button type="button" class="admin-row-delete-btn" data-action="delete" title="Delete user" aria-label="Delete user">🗑</button>
                   </td>
@@ -213,8 +291,61 @@
             handleSaveRow(row);
             return;
           }
+          if (action === "email") {
+            openEmailModal(row);
+            return;
+          }
           if (action === "delete") {
             handleDeleteRow(row);
+          }
+        });
+
+        emailForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const toEmail = String(emailToInput.value || "").trim();
+          const subject = String(emailSubjectInput.value || "").trim();
+          const message = String(emailMessageInput.value || "").trim();
+          if (!activeEmailUserId || !toEmail) {
+            setEmailStatus("Missing user email.");
+            return;
+          }
+          if (!subject || !message) {
+            setEmailStatus("Subject and message are required.");
+            return;
+          }
+          emailSendBtn.disabled = true;
+          setEmailStatus("Sending email...");
+          try {
+            const response = await fetch("/api/admin/email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                userId: activeEmailUserId,
+                email: toEmail,
+                name: activeEmailUserName,
+                subject,
+                message,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              setEmailStatus(payload?.error || "Failed to send email.");
+              return;
+            }
+            setEmailStatus("Email sent.");
+            setTimeout(closeEmailModal, 700);
+          } catch {
+            setEmailStatus("Network error while sending email.");
+          } finally {
+            emailSendBtn.disabled = false;
+          }
+        });
+
+        emailCloseBtn.addEventListener("click", closeEmailModal);
+        emailModalBackdrop.addEventListener("click", closeEmailModal);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && !emailModal.hidden) {
+            closeEmailModal();
           }
         });
 
