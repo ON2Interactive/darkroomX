@@ -30,6 +30,7 @@ loadEnvFile(path.join(ROOT, ".env"));
 
 const PORT = Number(process.env.PORT || 4174);
 const printAssets = new Map();
+const subscriptionAccessCache = new Map();
 
 const MIME_BY_EXT = {
   ".html": "text/html; charset=utf-8",
@@ -148,6 +149,206 @@ function getSupabaseConfig(req) {
   const derivedRedirect = `${getPublicBaseUrl(req)}/auth/callback`.replace(/([^:]\/)\/+/g, "$1");
   const redirectUrl = isValidHttpUrl(redirectFromEnv) ? redirectFromEnv : derivedRedirect;
   return { url: url.replace(/\/$/, ""), anonKey, serviceRoleKey, redirectUrl, signupCredits };
+}
+
+function getStripeConfig(req) {
+  const secretKey = normalizeEnvValue(process.env.STRIPE_SECRET_KEY || "");
+  const publishableKey = normalizeEnvValue(process.env.STRIPE_PUBLISHABLE_KEY || "");
+  const subscriptionPriceId = normalizeEnvValue(process.env.STRIPE_SUBSCRIPTION_PRICE_ID || "");
+  const topupPriceId = normalizeEnvValue(process.env.STRIPE_TOPUP_PRICE_ID || "");
+  const topupCreditsRaw = Number(process.env.STRIPE_TOPUP_CREDITS || "100");
+  const topupCredits = Number.isFinite(topupCreditsRaw) ? Math.max(1, Math.floor(topupCreditsRaw)) : 100;
+  const baseUrl = getPublicBaseUrl(req);
+  const successUrl = normalizeEnvValue(process.env.STRIPE_SUCCESS_URL || `${baseUrl}/pricing?success=1`);
+  const cancelUrl = normalizeEnvValue(process.env.STRIPE_CANCEL_URL || `${baseUrl}/pricing?canceled=1`);
+  return {
+    secretKey,
+    publishableKey,
+    subscriptionPriceId,
+    topupPriceId,
+    topupCredits,
+    successUrl,
+    cancelUrl,
+  };
+}
+
+function isSubscriptionActiveStatus(status) {
+  return status === "active" || status === "trialing";
+}
+
+function getCachedSubscriptionAccess(userId) {
+  const key = String(userId || "").trim();
+  if (!key) return null;
+  const cached = subscriptionAccessCache.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    subscriptionAccessCache.delete(key);
+    return null;
+  }
+  return cached;
+}
+
+function setCachedSubscriptionAccess(userId, active, customerId = "") {
+  const key = String(userId || "").trim();
+  if (!key) return;
+  subscriptionAccessCache.set(key, {
+    active: Boolean(active),
+    customerId: String(customerId || "").trim(),
+    expiresAt: Date.now() + 60 * 1000,
+  });
+}
+
+function clearCachedSubscriptionAccess(userId) {
+  const key = String(userId || "").trim();
+  if (!key) return;
+  subscriptionAccessCache.delete(key);
+}
+
+function parseStripeSignatureHeader(headerValue) {
+  const parts = String(headerValue || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const parsed = {};
+  parts.forEach((part) => {
+    const idx = part.indexOf("=");
+    if (idx <= 0) return;
+    const key = part.slice(0, idx);
+    const value = part.slice(idx + 1);
+    if (!parsed[key]) parsed[key] = [];
+    parsed[key].push(value);
+  });
+  return parsed;
+}
+
+function verifyStripeWebhookSignature(rawBody, signatureHeader, webhookSecret) {
+  if (!webhookSecret) return false;
+  const parsed = parseStripeSignatureHeader(signatureHeader);
+  const timestamp = parsed.t?.[0];
+  const signatures = parsed.v1 || [];
+  if (!timestamp || signatures.length === 0) return false;
+
+  const expected = crypto.createHmac("sha256", webhookSecret).update(`${timestamp}.${rawBody}`).digest("hex");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const signatureMatches = signatures.some((sig) => {
+    const actualBuffer = Buffer.from(String(sig), "utf8");
+    if (actualBuffer.length !== expectedBuffer.length) return false;
+    return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+  });
+  if (!signatureMatches) return false;
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) return false;
+  const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds);
+  return ageSeconds <= 300;
+}
+
+async function stripeApiRequest(secretKey, endpoint, { method = "GET", params = null } = {}) {
+  const url = new URL(`https://api.stripe.com/v1/${endpoint.replace(/^\//, "")}`);
+  const requestMethod = String(method || "GET").toUpperCase();
+  const headers = {
+    Authorization: `Bearer ${secretKey}`,
+  };
+  const options = {
+    method: requestMethod,
+    headers,
+  };
+
+  if (requestMethod === "GET" && params) {
+    for (const [key, value] of params.entries()) {
+      url.searchParams.append(key, value);
+    }
+  } else if (params) {
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
+    options.body = params.toString();
+  }
+
+  const response = await fetch(url.toString(), options);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload?.error?.message || `Stripe request failed (${response.status}).`;
+    return { ok: false, status: response.status || 502, error: message, payload };
+  }
+  return { ok: true, payload };
+}
+
+async function findStripeCustomerByEmail(secretKey, email, userId = "") {
+  const params = new URLSearchParams();
+  params.set("email", email);
+  params.set("limit", "10");
+  const customerResponse = await stripeApiRequest(secretKey, "customers", { method: "GET", params });
+  if (!customerResponse.ok) return customerResponse;
+  const customers = Array.isArray(customerResponse.payload?.data) ? customerResponse.payload.data : [];
+  if (customers.length === 0) return { ok: true, customer: null };
+  const matchedByUserId = customers.find((customer) => String(customer?.metadata?.supabase_user_id || "") === userId);
+  return { ok: true, customer: matchedByUserId || customers[0] };
+}
+
+async function getOrCreateStripeCustomerForUser(secretKey, user) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  const userId = String(user?.id || "").trim();
+  if (!email || !userId) {
+    return { ok: false, status: 400, error: "Missing user fields for Stripe customer." };
+  }
+
+  const found = await findStripeCustomerByEmail(secretKey, email, userId);
+  if (!found.ok) return found;
+  if (found.customer?.id) return { ok: true, customerId: found.customer.id };
+
+  const params = new URLSearchParams();
+  params.set("email", email);
+  params.set("metadata[supabase_user_id]", userId);
+  const displayName = getUsernameFromSupabaseUser(user);
+  if (displayName) params.set("name", displayName);
+
+  const createResponse = await stripeApiRequest(secretKey, "customers", { method: "POST", params });
+  if (!createResponse.ok) return createResponse;
+  return { ok: true, customerId: String(createResponse.payload?.id || "") };
+}
+
+async function hasActiveSubscriptionForCustomer(secretKey, customerId, subscriptionPriceId = "") {
+  const params = new URLSearchParams();
+  params.set("customer", customerId);
+  params.set("status", "all");
+  params.set("limit", "20");
+  const subscriptionResponse = await stripeApiRequest(secretKey, "subscriptions", { method: "GET", params });
+  if (!subscriptionResponse.ok) return subscriptionResponse;
+
+  const subscriptions = Array.isArray(subscriptionResponse.payload?.data) ? subscriptionResponse.payload.data : [];
+  const active = subscriptions.some((subscription) => {
+    if (!isSubscriptionActiveStatus(String(subscription?.status || ""))) return false;
+    if (!subscriptionPriceId) return true;
+    const items = Array.isArray(subscription?.items?.data) ? subscription.items.data : [];
+    return items.some((item) => String(item?.price?.id || "") === subscriptionPriceId);
+  });
+  return { ok: true, active };
+}
+
+async function ensureUserHasActiveSubscription(req, user) {
+  const config = getStripeConfig(req);
+  if (!config.secretKey || !config.subscriptionPriceId) {
+    return { ok: true, active: true, enforced: false };
+  }
+
+  const userId = String(user?.id || "").trim();
+  const cached = getCachedSubscriptionAccess(userId);
+  if (cached) {
+    return { ok: true, active: cached.active, customerId: cached.customerId, enforced: true };
+  }
+
+  const found = await findStripeCustomerByEmail(config.secretKey, String(user?.email || "").trim().toLowerCase(), userId);
+  if (!found.ok) return found;
+  if (!found.customer?.id) {
+    setCachedSubscriptionAccess(userId, false, "");
+    return { ok: true, active: false, customerId: "", enforced: true };
+  }
+
+  const customerId = String(found.customer.id || "");
+  const subscriptionState = await hasActiveSubscriptionForCustomer(config.secretKey, customerId, config.subscriptionPriceId);
+  if (!subscriptionState.ok) return subscriptionState;
+
+  setCachedSubscriptionAccess(userId, subscriptionState.active, customerId);
+  return { ok: true, active: Boolean(subscriptionState.active), customerId, enforced: true };
 }
 
 function createSupabaseRequestHeaders({ apiKey, bearerToken, prefer } = {}) {
@@ -934,6 +1135,212 @@ async function handleAdminUserEmail(req, res) {
   }
 }
 
+async function handleStripeSubscriptionCheckout(req, res) {
+  const authResult = await getAuthenticatedSupabaseUser(req);
+  if (!authResult.ok) {
+    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+  }
+
+  const stripeConfig = getStripeConfig(req);
+  if (!stripeConfig.secretKey || !stripeConfig.subscriptionPriceId) {
+    return sendJson(res, 500, { error: "Stripe subscription checkout is not configured." });
+  }
+
+  const customerResult = await getOrCreateStripeCustomerForUser(stripeConfig.secretKey, authResult.user);
+  if (!customerResult.ok || !customerResult.customerId) {
+    return sendJson(res, customerResult.status || 502, { error: customerResult.error || "Unable to create Stripe customer." });
+  }
+
+  const userId = String(authResult.user?.id || "").trim();
+  const params = new URLSearchParams();
+  params.set("mode", "subscription");
+  params.set("customer", customerResult.customerId);
+  params.set("line_items[0][price]", stripeConfig.subscriptionPriceId);
+  params.set("line_items[0][quantity]", "1");
+  params.set("success_url", stripeConfig.successUrl);
+  params.set("cancel_url", stripeConfig.cancelUrl);
+  params.set("client_reference_id", userId);
+  params.set("metadata[type]", "subscription");
+  params.set("metadata[supabase_user_id]", userId);
+  params.set("subscription_data[metadata][supabase_user_id]", userId);
+  params.set("allow_promotion_codes", "true");
+
+  const sessionResponse = await stripeApiRequest(stripeConfig.secretKey, "checkout/sessions", {
+    method: "POST",
+    params,
+  });
+  if (!sessionResponse.ok) {
+    return sendJson(res, sessionResponse.status || 502, { error: sessionResponse.error || "Unable to create Stripe checkout session." });
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    checkoutUrl: String(sessionResponse.payload?.url || ""),
+    sessionId: String(sessionResponse.payload?.id || ""),
+  });
+}
+
+async function handleStripeTopupCheckout(req, res) {
+  const authResult = await getAuthenticatedSupabaseUser(req);
+  if (!authResult.ok) {
+    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+  }
+
+  const stripeConfig = getStripeConfig(req);
+  if (!stripeConfig.secretKey || !stripeConfig.topupPriceId || !stripeConfig.subscriptionPriceId) {
+    return sendJson(res, 500, { error: "Stripe top-up checkout is not configured." });
+  }
+
+  const customerResult = await getOrCreateStripeCustomerForUser(stripeConfig.secretKey, authResult.user);
+  if (!customerResult.ok || !customerResult.customerId) {
+    return sendJson(res, customerResult.status || 502, { error: customerResult.error || "Unable to create Stripe customer." });
+  }
+
+  const subscriptionCheck = await hasActiveSubscriptionForCustomer(
+    stripeConfig.secretKey,
+    customerResult.customerId,
+    stripeConfig.subscriptionPriceId,
+  );
+  if (!subscriptionCheck.ok) {
+    return sendJson(res, subscriptionCheck.status || 502, { error: subscriptionCheck.error || "Unable to verify subscription." });
+  }
+  if (!subscriptionCheck.active) {
+    return sendJson(res, 403, { error: "Active subscription required before buying credits." });
+  }
+
+  const userId = String(authResult.user?.id || "").trim();
+  const params = new URLSearchParams();
+  params.set("mode", "payment");
+  params.set("customer", customerResult.customerId);
+  params.set("line_items[0][price]", stripeConfig.topupPriceId);
+  params.set("line_items[0][quantity]", "1");
+  params.set("success_url", stripeConfig.successUrl);
+  params.set("cancel_url", stripeConfig.cancelUrl);
+  params.set("client_reference_id", userId);
+  params.set("metadata[type]", "credit_topup");
+  params.set("metadata[supabase_user_id]", userId);
+  params.set("metadata[credits]", String(stripeConfig.topupCredits));
+  params.set("allow_promotion_codes", "true");
+
+  const sessionResponse = await stripeApiRequest(stripeConfig.secretKey, "checkout/sessions", {
+    method: "POST",
+    params,
+  });
+  if (!sessionResponse.ok) {
+    return sendJson(res, sessionResponse.status || 502, { error: sessionResponse.error || "Unable to create Stripe checkout session." });
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    checkoutUrl: String(sessionResponse.payload?.url || ""),
+    sessionId: String(sessionResponse.payload?.id || ""),
+  });
+}
+
+async function hasStripeTopupBeenApplied(req, userId, checkoutSessionId) {
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return { ok: false, status: 500, error: service.error };
+  }
+  const { config, headers } = service;
+  const endpoint = new URL(`${config.url}/rest/v1/credit_ledger`);
+  endpoint.searchParams.set("select", "id");
+  endpoint.searchParams.set("user_id", `eq.${userId}`);
+  endpoint.searchParams.set("reason", "eq.stripe_topup");
+  endpoint.searchParams.set("meta->>stripe_checkout_session_id", `eq.${checkoutSessionId}`);
+  endpoint.searchParams.set("limit", "1");
+  const response = await fetch(endpoint.toString(), {
+    method: "GET",
+    headers,
+  });
+  if (!response.ok) {
+    const reason = await response.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to inspect top-up ledger.${reason ? ` ${reason}` : ""}` };
+  }
+  const rows = await response.json().catch(() => []);
+  return { ok: true, applied: Array.isArray(rows) && rows.length > 0 };
+}
+
+function extractStripeUserIdFromEvent(event) {
+  const obj = event?.data?.object || {};
+  const fromObject = String(obj?.metadata?.supabase_user_id || obj?.client_reference_id || "").trim();
+  if (fromObject) return fromObject;
+  if (event?.type?.startsWith("customer.subscription")) {
+    return String(obj?.metadata?.supabase_user_id || "").trim();
+  }
+  return "";
+}
+
+function handleStripeWebhook(req, res) {
+  const stripeConfig = getStripeConfig(req);
+  const webhookSecret = normalizeEnvValue(process.env.STRIPE_WEBHOOK_SECRET || "");
+  if (!stripeConfig.secretKey || !webhookSecret) {
+    return sendJson(res, 500, { error: "Stripe webhook is not configured." });
+  }
+
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 2 * 1024 * 1024) req.destroy();
+  });
+
+  req.on("end", async () => {
+    try {
+      const signatureHeader = String(req.headers["stripe-signature"] || "");
+      const valid = verifyStripeWebhookSignature(raw, signatureHeader, webhookSecret);
+      if (!valid) {
+        return sendJson(res, 400, { error: "Invalid Stripe webhook signature." });
+      }
+
+      const event = JSON.parse(raw || "{}");
+      const eventType = String(event?.type || "");
+      const eventObject = event?.data?.object || {};
+      const userId = extractStripeUserIdFromEvent(event);
+      if (isLikelyUuid(userId)) {
+        clearCachedSubscriptionAccess(userId);
+      }
+
+      if (eventType === "checkout.session.completed") {
+        const mode = String(eventObject?.mode || "");
+        const eventUserId = String(eventObject?.metadata?.supabase_user_id || eventObject?.client_reference_id || "").trim();
+        if (mode === "payment" && eventObject?.metadata?.type === "credit_topup" && isLikelyUuid(eventUserId)) {
+          const checkoutSessionId = String(eventObject?.id || "").trim();
+          if (!checkoutSessionId) return sendJson(res, 200, { ok: true });
+
+          const alreadyApplied = await hasStripeTopupBeenApplied(req, eventUserId, checkoutSessionId);
+          if (!alreadyApplied.ok) {
+            return sendJson(res, alreadyApplied.status || 500, { error: alreadyApplied.error || "Unable to verify top-up event." });
+          }
+          if (!alreadyApplied.applied) {
+            const creditsFromMeta = Number(eventObject?.metadata?.credits || stripeConfig.topupCredits);
+            const topupCredits = Number.isFinite(creditsFromMeta) ? Math.max(1, Math.floor(creditsFromMeta)) : stripeConfig.topupCredits;
+            const applyResult = await applyCreditDelta({
+              req,
+              userId: eventUserId,
+              delta: topupCredits,
+              reason: "stripe_topup",
+              source: "stripe",
+              meta: {
+                stripe_event_id: String(event?.id || ""),
+                stripe_checkout_session_id: checkoutSessionId,
+                stripe_customer_id: String(eventObject?.customer || ""),
+                stripe_price_id: String(stripeConfig.topupPriceId || ""),
+              },
+            });
+            if (!applyResult.ok) {
+              return sendJson(res, applyResult.status || 500, { error: applyResult.error || "Unable to apply top-up credits." });
+            }
+          }
+        }
+      }
+
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 500, { error: error?.message || "Stripe webhook processing failed." });
+    }
+  });
+}
+
 function handleSupabaseAuthBootstrap(req, res) {
   let raw = "";
   req.on("data", (chunk) => {
@@ -1298,6 +1705,13 @@ async function handleNanoBananaEdit(req, res) {
       if (!userId) {
         return sendJson(res, 401, { error: "Unauthorized." });
       }
+      const subscriptionAccess = await ensureUserHasActiveSubscription(req, authResult.user);
+      if (!subscriptionAccess.ok) {
+        return sendJson(res, subscriptionAccess.status || 502, { error: subscriptionAccess.error || "Unable to verify subscription." });
+      }
+      if (!subscriptionAccess.active) {
+        return sendJson(res, 403, { error: "Active subscription required to use AI tools." });
+      }
 
       const cost = 1;
       const chargeResult = await applyCreditDelta({
@@ -1507,6 +1921,13 @@ async function handleNanoBananaGenerate(req, res) {
       const userId = String(authResult.user?.id || "").trim();
       if (!userId) {
         return sendJson(res, 401, { error: "Unauthorized." });
+      }
+      const subscriptionAccess = await ensureUserHasActiveSubscription(req, authResult.user);
+      if (!subscriptionAccess.ok) {
+        return sendJson(res, subscriptionAccess.status || 502, { error: subscriptionAccess.error || "Unable to verify subscription." });
+      }
+      if (!subscriptionAccess.active) {
+        return sendJson(res, 403, { error: "Active subscription required to use AI tools." });
       }
 
       const cost = 1;
@@ -1945,6 +2366,18 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/admin/email") {
     handleAdminUserEmail(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/stripe/checkout/subscription") {
+    handleStripeSubscriptionCheckout(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/stripe/checkout/topup") {
+    handleStripeTopupCheckout(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/stripe/webhook") {
+    handleStripeWebhook(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/image-edit") {

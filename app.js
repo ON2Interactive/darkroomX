@@ -524,6 +524,34 @@ const syncCreditsFromServer = (creditsBalance) => {
   syncCreditsUI();
 };
 
+const beginStripeCheckout = async (kind) => {
+  const token = getAuthToken();
+  if (!token) {
+    window.location.href = "/signup";
+    return;
+  }
+  const endpoint = kind === "subscription" ? "/api/stripe/checkout/subscription" : "/api/stripe/checkout/topup";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: "{}",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 403) {
+      window.alert(payload?.error || "Active subscription required before buying credits.");
+      window.location.href = "/pricing";
+      return;
+    }
+    throw new Error(payload?.error || "Unable to start checkout.");
+  }
+  const checkoutUrl = String(payload?.checkoutUrl || "");
+  if (!checkoutUrl) {
+    throw new Error("Missing checkout URL.");
+  }
+  window.location.href = checkoutUrl;
+};
+
 const syncCreditsUI = () => {
   const depleted = state.credits <= 0;
   creditsBtnLabel.textContent = depleted ? "Buy Credits" : `Credits: ${state.credits}`;
@@ -3722,8 +3750,15 @@ printModal.addEventListener("pointerdown", (event) => {
 });
 
 creditsModalCloseBtn?.addEventListener("click", closeCreditsModal);
-creditsModalBuyBtn?.addEventListener("click", () => {
-  window.location.href = "/pricing";
+creditsModalBuyBtn?.addEventListener("click", async () => {
+  creditsModalBuyBtn.disabled = true;
+  try {
+    await beginStripeCheckout("topup");
+  } catch (error) {
+    window.alert(error?.message || "Unable to open checkout.");
+  } finally {
+    creditsModalBuyBtn.disabled = false;
+  }
 });
 creditsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === creditsModal) {

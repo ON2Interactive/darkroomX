@@ -37,7 +37,7 @@
                 <li>Export - 10 credits</li>
               </ul>
               <p class="landing-pricing-note">Best for testing ideas, moodboards, and quick client previews.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
+              <a href="#" id="pricingSubscribeBtnBasic" class="landing-pricing-btn">Get Started</a>
             </article>
 
             <article class="landing-pricing-card is-featured">
@@ -51,7 +51,7 @@
                 <li>Export - 10 credits</li>
               </ul>
               <p class="landing-pricing-note">Ideal for photographers and studios running multiple projects.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
+              <a href="#" id="pricingTopupBtn" class="landing-pricing-btn">Get Started</a>
             </article>
 
             <article class="landing-pricing-card is-brand">
@@ -64,7 +64,7 @@
                 <li>Export - 10 credits</li>
               </ul>
               <p class="landing-pricing-note">Built for higher-volume brand and editorial workflows.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
+              <a href="#" id="pricingSubscribeBtnPro" class="landing-pricing-btn">Get Started</a>
             </article>
           </div>
         </div>
@@ -129,6 +129,60 @@
         if (footerYear) {
           footerYear.textContent = String(new Date().getFullYear());
         }
+
+        const getAuthToken = () => {
+          try {
+            return String(window.localStorage.getItem("darkroomx_auth_token") || "").trim();
+          } catch {
+            return "";
+          }
+        };
+
+        const postCheckout = async (endpoint) => {
+          const token = getAuthToken();
+          if (!token) {
+            window.location.href = "/signup";
+            return;
+          }
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: "{}",
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || "Unable to start checkout.");
+          }
+          const checkoutUrl = String(payload?.checkoutUrl || "");
+          if (!checkoutUrl) throw new Error("Missing checkout URL.");
+          window.location.href = checkoutUrl;
+        };
+
+        const subscribeBtnBasic = document.getElementById("pricingSubscribeBtnBasic");
+        const subscribeBtnPro = document.getElementById("pricingSubscribeBtnPro");
+        const topupBtn = document.getElementById("pricingTopupBtn");
+
+        const bindCheckout = (button, endpoint) => {
+          if (!button) return;
+          button.addEventListener("click", async (event) => {
+            event.preventDefault();
+            button.setAttribute("aria-disabled", "true");
+            try {
+              await postCheckout(endpoint);
+            } catch (error) {
+              window.alert(error?.message || "Unable to open checkout.");
+            } finally {
+              button.removeAttribute("aria-disabled");
+            }
+          });
+        };
+
+        bindCheckout(subscribeBtnBasic, "/api/stripe/checkout/subscription");
+        bindCheckout(subscribeBtnPro, "/api/stripe/checkout/subscription");
+        bindCheckout(topupBtn, "/api/stripe/checkout/topup");
       })();
     </script>
   </body>
