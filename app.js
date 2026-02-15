@@ -87,6 +87,11 @@ const printModalCloseBtn = document.getElementById("printModalCloseBtn");
 const printCancelBtn = document.getElementById("printCancelBtn");
 const printSubmitBtn = document.getElementById("printSubmitBtn");
 const printModalStatus = document.getElementById("printModalStatus");
+const creditsModal = document.getElementById("creditsModal");
+const creditsModalCloseBtn = document.getElementById("creditsModalCloseBtn");
+const creditsModalCancelBtn = document.getElementById("creditsModalCancelBtn");
+const creditsModalBuyBtn = document.getElementById("creditsModalBuyBtn");
+const creditsModalMessage = document.getElementById("creditsModalMessage");
 const printOfferingSelect = document.getElementById("printOfferingSelect");
 const printQuantityInput = document.getElementById("printQuantityInput");
 const printCurrencyInput = document.getElementById("printCurrencyInput");
@@ -1908,6 +1913,27 @@ const closePrintModal = () => {
   printModal.classList.add("hidden-panel");
 };
 
+const openCreditsModal = ({ depleted = false, context = "status" } = {}) => {
+  if (!creditsModal || !creditsModalMessage) return;
+  const balance = creditsService.getBalance();
+  if (depleted) {
+    creditsModalMessage.textContent =
+      context === "action"
+        ? "You are out of credits for this action."
+        : "You are out of credits.";
+  } else {
+    creditsModalMessage.textContent = `You have ${balance} credits left.`;
+  }
+  creditsModalBuyBtn.style.display = depleted ? "inline-flex" : "inline-flex";
+  creditsModal.classList.remove("hidden-panel");
+  hydrateIcons();
+};
+
+const closeCreditsModal = () => {
+  if (!creditsModal) return;
+  creditsModal.classList.add("hidden-panel");
+};
+
 const submitPeechoPrintOrder = async () => {
   if (state.isSubmittingPrint) return;
   const photo = getSelectedPhoto();
@@ -2197,7 +2223,7 @@ const appendGeneratedPhotoFromDataUrl = async (imageDataUrl, pendingPhotoId = nu
 const submitGenerateRequest = async () => {
   if (state.isSubmittingGenerate) return;
   if (!creditsService.canAfford(CREDIT_COSTS.generate)) {
-    window.alert("Insufficient credits. Buy Credits to continue.");
+    openCreditsModal({ depleted: true, context: "action" });
     return;
   }
 
@@ -2258,7 +2284,7 @@ const submitGenerateRequest = async () => {
 const submitEditRequest = async () => {
   if (state.isSubmittingEdit) return;
   if (!creditsService.canAfford(CREDIT_COSTS.edit)) {
-    window.alert("Insufficient credits. Buy Credits to continue.");
+    openCreditsModal({ depleted: true, context: "action" });
     return;
   }
 
@@ -3159,7 +3185,7 @@ const exportSelectedPhoto = async () => {
   const photo = getSelectedPhoto();
   if (!photo || !photo.imgEl) return;
   if (!creditsService.canAfford(CREDIT_COSTS.export)) {
-    window.alert("Insufficient credits. Buy Credits to export.");
+    openCreditsModal({ depleted: true, context: "action" });
     return;
   }
 
@@ -3618,10 +3644,10 @@ orderPrintBtn.addEventListener("click", () => {
 });
 creditsBtn.addEventListener("click", () => {
   if (state.credits <= 0) {
-    window.alert("Credits depleted. Buy Credits flow will be connected next.");
+    openCreditsModal({ depleted: true, context: "status" });
     return;
   }
-  window.alert(`You have ${state.credits} credits left.\n\nCurrent costs:\n- Export: ${CREDIT_COSTS.export}\n- Generate: ${CREDIT_COSTS.generate}\n- Edit output: ${CREDIT_COSTS.edit}`);
+  openCreditsModal({ depleted: false, context: "status" });
 });
 
 compareBtn.addEventListener("click", () => {
@@ -3666,6 +3692,17 @@ printSubmitBtn.addEventListener("click", submitPeechoPrintOrder);
 printModal.addEventListener("pointerdown", (event) => {
   if (event.target === printModal) {
     closePrintModal();
+  }
+});
+
+creditsModalCloseBtn?.addEventListener("click", closeCreditsModal);
+creditsModalCancelBtn?.addEventListener("click", closeCreditsModal);
+creditsModalBuyBtn?.addEventListener("click", () => {
+  window.location.href = "/pricing";
+});
+creditsModal?.addEventListener("pointerdown", (event) => {
+  if (event.target === creditsModal) {
+    closeCreditsModal();
   }
 });
 

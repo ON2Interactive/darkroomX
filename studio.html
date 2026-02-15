@@ -531,6 +531,33 @@
       </div>
     </div>
 
+    <div id="creditsModal" class="modal-backdrop hidden-panel" role="dialog" aria-modal="true" aria-label="Credits">
+      <div class="modal-card credits-modal-card">
+        <div class="modal-header">
+          <h3>Credits</h3>
+          <button id="creditsModalCloseBtn" class="icon-btn" type="button" aria-label="Close Credits Modal">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p id="creditsModalMessage" class="credits-modal-copy"></p>
+          <p class="credits-modal-costs">
+            Current costs:
+            <br />
+            - Export: 10
+            <br />
+            - Generate: 10
+            <br />
+            - Edit output: 10
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button id="creditsModalCancelBtn" class="modal-text-btn" type="button">Close</button>
+          <button id="creditsModalBuyBtn" class="modal-text-btn modal-text-btn-primary" type="button">Buy Credits</button>
+        </div>
+      </div>
+    </div>
+
     <div id="editProcessingOverlay" class="processing-overlay hidden-panel" aria-live="polite">
       <div class="processing-card">
         <i data-lucide="loader-circle" class="processing-icon"></i>
