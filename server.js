@@ -250,8 +250,9 @@ async function bootstrapSupabaseUserData(user, req) {
 
   const signupBonusRows = await signupBonusCheckResponse.json().catch(() => []);
   const hasSignupBonus = Array.isArray(signupBonusRows) && signupBonusRows.length > 0;
+  let createdSignupMarker = false;
 
-  if (!hasSignupBonus && config.signupCredits > 0) {
+  if (!hasSignupBonus) {
     const ledgerInsertResponse = await fetch(`${config.url}/rest/v1/credit_ledger`, {
       method: "POST",
       headers: {
@@ -269,9 +270,12 @@ async function bootstrapSupabaseUserData(user, req) {
       ]),
     });
 
-    if (!ledgerInsertResponse.ok) {
+    if (!ledgerInsertResponse.ok && ledgerInsertResponse.status !== 409) {
       const reason = await ledgerInsertResponse.text().catch(() => "");
       return { ok: false, status: 502, error: `Unable to create starter credits.${reason ? ` ${reason}` : ""}` };
+    }
+    if (ledgerInsertResponse.ok) {
+      createdSignupMarker = true;
     }
   }
 
@@ -340,6 +344,15 @@ async function bootstrapSupabaseUserData(user, req) {
     }
     const created = await createProjectResponse.json().catch(() => []);
     activeProject = Array.isArray(created) && created[0] ? created[0] : null;
+  }
+
+  if (createdSignupMarker) {
+    sendSignupWelcomeAndNotificationEmail({
+      userName: getUsernameFromSupabaseUser(user),
+      userEmail: email,
+    }).catch((error) => {
+      console.error("Signup welcome email failed:", error?.message || error);
+    });
   }
 
   return {
@@ -848,6 +861,24 @@ async function sendContactEmail({ name, email, subject, message }) {
     <p>${String(message).replace(/[<>&"]/g, "").replace(/\n/g, "<br />")}</p>
   `;
 
+  const sendResult = await sendSendgridMail({
+    sendgridApiKey,
+    fromEmail,
+    toEmail,
+    replyTo: { email, name },
+    subject: `[DarkroomX Contact] ${subject}`,
+    textBody,
+    htmlBody,
+  });
+  if (!sendResult.ok) return sendResult;
+  return { ok: true };
+}
+
+async function sendSendgridMail({ sendgridApiKey, fromEmail, toEmail, subject, textBody, htmlBody, replyTo = null }) {
+  if (!sendgridApiKey || !fromEmail || !toEmail) {
+    return { ok: false, status: 500, error: "Missing SendGrid mail configuration." };
+  }
+
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
     headers: {
@@ -855,12 +886,12 @@ async function sendContactEmail({ name, email, subject, message }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      personalizations: [{ to: [{ email: toEmail }], subject: `[DarkroomX Contact] ${subject}` }],
-      from: { email: fromEmail, name: "DarkroomX Contact Form" },
-      reply_to: { email, name },
+      personalizations: [{ to: [{ email: toEmail }], subject }],
+      from: { email: fromEmail, name: "DarkroomX" },
+      ...(replyTo ? { reply_to: replyTo } : {}),
       content: [
-        { type: "text/plain", value: textBody },
-        { type: "text/html", value: htmlBody },
+        { type: "text/plain", value: textBody || "" },
+        { type: "text/html", value: htmlBody || "" },
       ],
     }),
   });
@@ -872,9 +903,88 @@ async function sendContactEmail({ name, email, subject, message }) {
     } catch {
       errorText = "";
     }
-    return { ok: false, status: response.status || 502, error: errorText || "Failed to send contact email." };
+    return { ok: false, status: response.status || 502, error: errorText || "Failed to send email." };
   }
   return { ok: true };
+}
+
+async function sendSignupWelcomeAndNotificationEmail({ userName, userEmail }) {
+  const sendgridApiKey = normalizeEnvValue(process.env.SENDGRID_API_KEY || "");
+  const fromEmail = normalizeEnvValue(process.env.CONTACT_FROM_EMAIL || "");
+  const notifyEmail = normalizeEnvValue(process.env.SIGNUP_NOTIFY_EMAIL || process.env.CONTACT_TO_EMAIL || "hello@darkroomx.com");
+  if (!sendgridApiKey || !fromEmail || !userEmail) return;
+
+  const safeName = String(userName || "").trim() || "there";
+  const welcomeSubject = "Welcome to DarkroomX";
+  const welcomeText = [
+    `Hi ${safeName},`,
+    "",
+    "Welcome to DarkroomX - we're glad you're here.",
+    "",
+    "DarkroomX is built for photographers and creators who want a focused, modern editing experience without unnecessary distractions. Edit, generate, and reimagine images using powerful tools and AI, all within a clean, session-based workflow that never touches your original files.",
+    "",
+    "Here’s what you can do right away:",
+    "- Upload an image and start editing instantly",
+    "- Use AI to generate or reimagine images at up to 4K resolution",
+    "- Experiment freely - sessions are non-destructive",
+    "- Export only when you’re ready",
+    "",
+    "There are no catalogs to manage, no lock-in, and no pressure to commit. Work at your own pace and use DarkroomX however it fits your workflow.",
+    "",
+    "If you have questions, feedback, or ideas, we'd genuinely love to hear from you. DarkroomX is shaped by photographers who use it every day.",
+    "",
+    "Thanks for being here,",
+    "The DarkroomX Team",
+  ].join("\n");
+
+  const welcomeHtml = `
+    <p>Hi ${String(safeName).replace(/[<>&"]/g, "")},</p>
+    <p>Welcome to DarkroomX - we're glad you're here.</p>
+    <p>DarkroomX is built for photographers and creators who want a focused, modern editing experience without unnecessary distractions. Edit, generate, and reimagine images using powerful tools and AI, all within a clean, session-based workflow that never touches your original files.</p>
+    <p>Here’s what you can do right away:</p>
+    <ul>
+      <li>Upload an image and start editing instantly</li>
+      <li>Use AI to generate or reimagine images at up to 4K resolution</li>
+      <li>Experiment freely - sessions are non-destructive</li>
+      <li>Export only when you’re ready</li>
+    </ul>
+    <p>There are no catalogs to manage, no lock-in, and no pressure to commit. Work at your own pace and use DarkroomX however it fits your workflow.</p>
+    <p>If you have questions, feedback, or ideas, we'd genuinely love to hear from you. DarkroomX is shaped by photographers who use it every day.</p>
+    <p>Thanks for being here,<br />The DarkroomX Team</p>
+  `;
+
+  const internalSubject = "DarkroomX: New user signup";
+  const internalText = [
+    "A new user signed up for DarkroomX.",
+    "",
+    `Name: ${safeName}`,
+    `Email: ${userEmail}`,
+    `Signed up at: ${new Date().toISOString()}`,
+  ].join("\n");
+  const internalHtml = `
+    <p>A new user signed up for DarkroomX.</p>
+    <p><strong>Name:</strong> ${String(safeName).replace(/[<>&"]/g, "")}</p>
+    <p><strong>Email:</strong> ${String(userEmail).replace(/[<>&"]/g, "")}</p>
+    <p><strong>Signed up at:</strong> ${new Date().toISOString()}</p>
+  `;
+
+  await sendSendgridMail({
+    sendgridApiKey,
+    fromEmail,
+    toEmail: userEmail,
+    subject: welcomeSubject,
+    textBody: welcomeText,
+    htmlBody: welcomeHtml,
+  });
+
+  await sendSendgridMail({
+    sendgridApiKey,
+    fromEmail,
+    toEmail: notifyEmail,
+    subject: internalSubject,
+    textBody: internalText,
+    htmlBody: internalHtml,
+  });
 }
 
 function handleContactSubmit(req, res) {
