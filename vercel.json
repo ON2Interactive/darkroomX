@@ -46,6 +46,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "auth-callback.html",
+      "use": "@vercel/static"
+    },
+    {
       "src": "adminlogin.html",
       "use": "@vercel/static"
     },
@@ -112,6 +116,10 @@
       "dest": "/pricing.html"
     },
     {
+      "src": "/auth/callback",
+      "dest": "/auth-callback.html"
+    },
+    {
       "src": "/adminlogin",
       "dest": "/adminlogin.html"
     },
@@ -120,7 +128,7 @@
       "dest": "/admin.html"
     },
     {
-      "src": "/(app\\.js|styles\\.css|studio\\.html|signup\\.html|faqs\\.html|help\\.html|contact\\.html|404\\.html|privacy\\.html|terms\\.html|pricing\\.html|adminlogin\\.html|admin\\.html|favicon\\.ico|.*\\.(png|jpg|jpeg|svg|webp|gif))",
+      "src": "/(app\\.js|styles\\.css|studio\\.html|signup\\.html|faqs\\.html|help\\.html|contact\\.html|404\\.html|privacy\\.html|terms\\.html|pricing\\.html|auth-callback\\.html|adminlogin\\.html|admin\\.html|favicon\\.ico|.*\\.(png|jpg|jpeg|svg|webp|gif))",
       "dest": "/$1"
     },
     {

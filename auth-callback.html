@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signing In - DarkroomX</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/darkroomx-favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="signup-page">
+    <main class="signup-shell">
+      <section class="signup-card" aria-label="Auth callback">
+        <img src="/assets/darkroomx-logo-white.svg" alt="DarkroomX" class="signup-logo" />
+        <h1>Signing you in...</h1>
+        <p id="authCallbackStatus">Finalizing account setup.</p>
+        <a class="signup-back" href="/signup">Back to Sign Up</a>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const statusEl = document.getElementById("authCallbackStatus");
+
+        const updateStatus = (message) => {
+          if (statusEl) statusEl.textContent = String(message || "");
+        };
+
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const queryParams = new URLSearchParams(window.location.search || "");
+        const oauthError = hashParams.get("error_description") || hashParams.get("error") || queryParams.get("error_description") || queryParams.get("error");
+        const accessToken = hashParams.get("access_token");
+
+        if (oauthError) {
+          updateStatus(`Sign-in failed: ${oauthError}`);
+          return;
+        }
+
+        if (!accessToken) {
+          updateStatus("Missing auth token. Please try signing in again.");
+          return;
+        }
+
+        updateStatus("Creating your DarkroomX profile...");
+        fetch("/api/auth/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken }),
+        })
+          .then(async (response) => {
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(payload?.error || "Unable to complete sign-in.");
+            }
+
+            // Keep lightweight client context for future user-aware UI work.
+            window.localStorage.setItem("darkroomx_auth_token", accessToken);
+            if (payload?.profile) {
+              window.localStorage.setItem("darkroomx_profile", JSON.stringify(payload.profile));
+            }
+            if (payload?.activeProject?.id) {
+              window.localStorage.setItem("darkroomx_active_project_id", payload.activeProject.id);
+            }
+
+            window.location.replace(payload?.redirectTo || "/studio");
+          })
+          .catch((error) => {
+            updateStatus(error?.message || "Unable to complete sign-in.");
+          });
+      })();
+    </script>
+  </body>
+</html>

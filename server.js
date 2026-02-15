@@ -119,7 +119,9 @@ function getPublicBaseUrl(req) {
   if (fromEnv) return fromEnv.replace(/\/$/, "");
   const host = req.headers.host;
   if (!host) return "";
-  return `http://${host}`;
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  const protocol = forwardedProto === "https" ? "https" : "http";
+  return `${protocol}://${host}`;
 }
 
 function decodeDataUrl(dataUrl) {
@@ -136,7 +138,234 @@ function getPeechoSecretHash(orderId) {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
+function getSupabaseConfig(req) {
+  const url = normalizeEnvValue(process.env.SUPABASE_URL || "");
+  const anonKey = normalizeEnvValue(process.env.SUPABASE_ANON_KEY || "");
+  const serviceRoleKey = normalizeEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
+  const redirectFromEnv = normalizeEnvValue(process.env.SUPABASE_AUTH_REDIRECT_URL || "");
+  const signupCreditsRaw = Number(process.env.SUPABASE_SIGNUP_CREDITS || "1000");
+  const signupCredits = Number.isFinite(signupCreditsRaw) ? Math.max(0, Math.floor(signupCreditsRaw)) : 1000;
+  const derivedRedirect = `${getPublicBaseUrl(req)}/auth/callback`.replace(/([^:]\/)\/+/g, "$1");
+  const redirectUrl = isValidHttpUrl(redirectFromEnv) ? redirectFromEnv : derivedRedirect;
+  return { url: url.replace(/\/$/, ""), anonKey, serviceRoleKey, redirectUrl, signupCredits };
+}
+
+function createSupabaseRequestHeaders({ apiKey, bearerToken, prefer } = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) headers.apikey = apiKey;
+  if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+  if (prefer) headers.Prefer = prefer;
+  return headers;
+}
+
+function getUsernameFromSupabaseUser(user) {
+  const email = String(user?.email || "").trim();
+  const fallback = email.includes("@") ? email.split("@")[0] : "darkroomx-user";
+  const fromMeta =
+    String(
+      user?.user_metadata?.preferred_username ||
+        user?.user_metadata?.user_name ||
+        user?.user_metadata?.name ||
+        user?.user_metadata?.full_name ||
+        "",
+    ).trim() || fallback;
+  return fromMeta.slice(0, 64);
+}
+
+async function fetchSupabaseUserByAccessToken(accessToken, req) {
+  const config = getSupabaseConfig(req);
+  if (!config.url || !config.anonKey) {
+    return { ok: false, status: 500, error: "Supabase auth is not configured." };
+  }
+
+  try {
+    const response = await fetch(`${config.url}/auth/v1/user`, {
+      method: "GET",
+      headers: createSupabaseRequestHeaders({ apiKey: config.anonKey, bearerToken: accessToken }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.id) {
+      return { ok: false, status: 401, error: "Invalid or expired auth session." };
+    }
+    return { ok: true, user: payload };
+  } catch {
+    return { ok: false, status: 502, error: "Unable to validate Supabase session." };
+  }
+}
+
+async function bootstrapSupabaseUserData(user, req) {
+  const config = getSupabaseConfig(req);
+  if (!config.url || !config.serviceRoleKey) {
+    return { ok: false, status: 500, error: "Supabase service role is not configured." };
+  }
+
+  const userId = String(user?.id || "").trim();
+  const email = String(user?.email || "").trim();
+  if (!userId || !email) {
+    return { ok: false, status: 400, error: "Supabase user payload is missing required fields." };
+  }
+
+  const serviceHeaders = createSupabaseRequestHeaders({
+    apiKey: config.serviceRoleKey,
+    bearerToken: config.serviceRoleKey,
+  });
+
+  const profileUpsertPayload = [
+    {
+      id: userId,
+      email,
+      username: getUsernameFromSupabaseUser(user),
+      last_sign_in_at: new Date().toISOString(),
+    },
+  ];
+
+  const profileUpsertResponse = await fetch(`${config.url}/rest/v1/profiles?on_conflict=id`, {
+    method: "POST",
+    headers: {
+      ...serviceHeaders,
+      Prefer: "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify(profileUpsertPayload),
+  });
+
+  if (!profileUpsertResponse.ok) {
+    const reason = await profileUpsertResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to upsert profile.${reason ? ` ${reason}` : ""}` };
+  }
+
+  const signupBonusCheckResponse = await fetch(
+    `${config.url}/rest/v1/credit_ledger?select=id&user_id=eq.${encodeURIComponent(userId)}&reason=eq.signup_bonus&limit=1`,
+    {
+      method: "GET",
+      headers: serviceHeaders,
+    },
+  );
+
+  if (!signupBonusCheckResponse.ok) {
+    const reason = await signupBonusCheckResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to inspect credit history.${reason ? ` ${reason}` : ""}` };
+  }
+
+  const signupBonusRows = await signupBonusCheckResponse.json().catch(() => []);
+  const hasSignupBonus = Array.isArray(signupBonusRows) && signupBonusRows.length > 0;
+
+  if (!hasSignupBonus && config.signupCredits > 0) {
+    const ledgerInsertResponse = await fetch(`${config.url}/rest/v1/credit_ledger`, {
+      method: "POST",
+      headers: {
+        ...serviceHeaders,
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify([
+        {
+          user_id: userId,
+          project_id: null,
+          delta: config.signupCredits,
+          reason: "signup_bonus",
+          source: "signup_bootstrap",
+        },
+      ]),
+    });
+
+    if (!ledgerInsertResponse.ok) {
+      const reason = await ledgerInsertResponse.text().catch(() => "");
+      return { ok: false, status: 502, error: `Unable to create starter credits.${reason ? ` ${reason}` : ""}` };
+    }
+  }
+
+  const creditsResponse = await fetch(`${config.url}/rest/v1/credit_ledger?select=delta&user_id=eq.${encodeURIComponent(userId)}`, {
+    method: "GET",
+    headers: serviceHeaders,
+  });
+  if (!creditsResponse.ok) {
+    const reason = await creditsResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to read credits.${reason ? ` ${reason}` : ""}` };
+  }
+  const creditRows = await creditsResponse.json().catch(() => []);
+  const creditsBalance = Array.isArray(creditRows)
+    ? creditRows.reduce((sum, row) => sum + Number(row?.delta || 0), 0)
+    : 0;
+
+  const profileCreditsUpdateResponse = await fetch(`${config.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: {
+      ...serviceHeaders,
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify({ credits_balance: creditsBalance }),
+  });
+
+  if (!profileCreditsUpdateResponse.ok) {
+    const reason = await profileCreditsUpdateResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to update profile credits.${reason ? ` ${reason}` : ""}` };
+  }
+
+  const activeProjectResponse = await fetch(
+    `${config.url}/rest/v1/projects?select=id,name,status&user_id=eq.${encodeURIComponent(userId)}&status=eq.active&order=started_at.desc&limit=1`,
+    {
+      method: "GET",
+      headers: serviceHeaders,
+    },
+  );
+
+  if (!activeProjectResponse.ok) {
+    const reason = await activeProjectResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to read active session.${reason ? ` ${reason}` : ""}` };
+  }
+
+  const activeProjects = await activeProjectResponse.json().catch(() => []);
+  let activeProject = Array.isArray(activeProjects) && activeProjects[0] ? activeProjects[0] : null;
+
+  if (!activeProject) {
+    const sessionName = `Session ${new Date().toISOString().slice(0, 10)}`;
+    const createProjectResponse = await fetch(`${config.url}/rest/v1/projects`, {
+      method: "POST",
+      headers: {
+        ...serviceHeaders,
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify([
+        {
+          user_id: userId,
+          name: sessionName,
+          status: "active",
+        },
+      ]),
+    });
+    if (!createProjectResponse.ok) {
+      const reason = await createProjectResponse.text().catch(() => "");
+      return { ok: false, status: 502, error: `Unable to create initial session.${reason ? ` ${reason}` : ""}` };
+    }
+    const created = await createProjectResponse.json().catch(() => []);
+    activeProject = Array.isArray(created) && created[0] ? created[0] : null;
+  }
+
+  return {
+    ok: true,
+    profile: {
+      id: userId,
+      email,
+      username: getUsernameFromSupabaseUser(user),
+      creditsBalance,
+    },
+    activeProject,
+  };
+}
+
 function getGoogleAuthStartUrl(req) {
+  const supabaseConfig = getSupabaseConfig(req);
+  if (supabaseConfig.url && supabaseConfig.anonKey && supabaseConfig.redirectUrl) {
+    const params = new URLSearchParams({
+      provider: "google",
+      redirect_to: supabaseConfig.redirectUrl,
+      scopes: "openid email profile",
+      prompt: "select_account",
+    });
+    return `${supabaseConfig.url}/auth/v1/authorize?${params.toString()}`;
+  }
+
   const explicitStartUrl = normalizeEnvValue(process.env.GOOGLE_AUTH_START_URL || process.env.GOOGLE_OAUTH_START_URL || "");
   if (isValidHttpUrl(explicitStartUrl)) return explicitStartUrl;
 
@@ -256,6 +485,43 @@ function handleAdminLogin(req, res) {
 function handleAdminLogout(_req, res) {
   clearAdminAuthCookie(res);
   return sendJson(res, 200, { ok: true });
+}
+
+function handleSupabaseAuthBootstrap(req, res) {
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(raw || "{}");
+      const accessToken = String(payload?.accessToken || "").trim();
+      if (!accessToken) {
+        return sendJson(res, 400, { error: "Missing access token." });
+      }
+
+      const supabaseUserResult = await fetchSupabaseUserByAccessToken(accessToken, req);
+      if (!supabaseUserResult.ok) {
+        return sendJson(res, supabaseUserResult.status || 401, { error: supabaseUserResult.error || "Invalid session." });
+      }
+
+      const bootstrapResult = await bootstrapSupabaseUserData(supabaseUserResult.user, req);
+      if (!bootstrapResult.ok) {
+        return sendJson(res, bootstrapResult.status || 500, { error: bootstrapResult.error || "Unable to bootstrap user." });
+      }
+
+      return sendJson(res, 200, {
+        ok: true,
+        redirectTo: "/studio",
+        profile: bootstrapResult.profile,
+        activeProject: bootstrapResult.activeProject,
+      });
+    } catch (error) {
+      return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+    }
+  });
 }
 
 async function verifyRecaptchaToken(token, remoteIp) {
@@ -875,6 +1141,8 @@ function serveStatic(req, res) {
                       ? "/terms.html"
                       : rawPath === "/pricing"
                         ? "/pricing.html"
+                        : rawPath === "/auth/callback"
+                          ? "/auth-callback.html"
                         : rawPath === "/adminlogin"
                           ? "/adminlogin.html"
                           : rawPath === "/admin"
@@ -924,11 +1192,15 @@ function requestHandler(req, res) {
     if (!authUrl) {
       return sendJson(res, 500, {
         error:
-          "Google OAuth is not configured. Set GOOGLE_AUTH_START_URL (or GOOGLE_OAUTH_START_URL), or set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_REDIRECT_URI.",
+          "Google OAuth is not configured. Set Supabase keys (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_AUTH_REDIRECT_URL) or legacy GOOGLE_OAUTH_* variables.",
       });
     }
     res.writeHead(302, { Location: authUrl, "Cache-Control": "no-store" });
     res.end();
+    return;
+  }
+  if (req.method === "POST" && req.url === "/api/auth/bootstrap") {
+    handleSupabaseAuthBootstrap(req, res);
     return;
   }
   if (req.method === "POST" && req.url === "/api/contact") {
