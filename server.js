@@ -175,6 +175,17 @@ function getStripeConfig(req) {
   };
 }
 
+function getCloudConvertConfig() {
+  const apiKey = normalizeEnvValue(process.env.CLOUDCONVERT_API_KEY || "");
+  const outputFormatRaw = normalizeEnvValue(process.env.CLOUDCONVERT_RAW_OUTPUT_FORMAT || "jpg").toLowerCase();
+  const outputFormat = /^[a-z0-9]+$/.test(outputFormatRaw) ? outputFormatRaw : "jpg";
+  const jpgQualityRaw = Number(process.env.CLOUDCONVERT_RAW_JPG_QUALITY || "100");
+  const jpgQuality = Number.isFinite(jpgQualityRaw) ? Math.max(1, Math.min(100, Math.floor(jpgQualityRaw))) : 100;
+  const timeoutMsRaw = Number(process.env.CLOUDCONVERT_RAW_TIMEOUT_MS || "120000");
+  const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(10_000, Math.min(600_000, Math.floor(timeoutMsRaw))) : 120_000;
+  return { apiKey, outputFormat, jpgQuality, timeoutMs };
+}
+
 function getTrialWindowMs() {
   const hoursRaw = Number(process.env.TRIAL_HOURS || "24");
   const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, Math.floor(hoursRaw))) : 24;
@@ -799,6 +810,31 @@ function parseJsonBody(req, maxBytes = 64 * 1024) {
   });
 }
 
+async function cloudConvertApiRequest(endpoint, apiKey, { method = "GET", payload = null, timeoutMs = 120_000, baseUrl = "https://api.cloudconvert.com/v2" } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(payload ? { "Content-Type": "application/json" } : {}),
+      },
+      body: payload ? JSON.stringify(payload) : undefined,
+      signal: controller.signal,
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { ok: false, status: response.status || 502, error: String(json?.message || json?.error || `CloudConvert request failed (${response.status}).`) };
+    }
+    return { ok: true, data: json?.data ?? json };
+  } catch (error) {
+    return { ok: false, status: 502, error: error?.name === "AbortError" ? "CloudConvert request timed out." : String(error?.message || "CloudConvert request failed.") };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function parseBinaryBody(req, maxBytes = 80 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -871,6 +907,125 @@ function extractLargestEmbeddedJpeg(buffer) {
 
   if (largestStart < 0 || largestEnd <= largestStart) return null;
   return buffer.slice(largestStart, largestEnd);
+}
+
+function getTaskByNameOrOperation(tasks, name, operation) {
+  if (!Array.isArray(tasks)) return null;
+  return (
+    tasks.find((task) => String(task?.name || "") === String(name || "")) ||
+    tasks.find((task) => String(task?.operation || "") === String(operation || ""))
+  );
+}
+
+async function cloudConvertConvertRawToImage(buffer, fileName, { apiKey, outputFormat = "jpg", jpgQuality = 100, timeoutMs = 120_000 } = {}) {
+  if (!apiKey) {
+    return { ok: false, status: 500, error: "CloudConvert API key is not configured." };
+  }
+  const inputFormat = getFileExtension(fileName);
+  if (!inputFormat) {
+    return { ok: false, status: 400, error: "Missing RAW input format." };
+  }
+
+  const convertTask = {
+    operation: "convert",
+    input: "import_raw",
+    input_format: inputFormat,
+    output_format: outputFormat,
+  };
+  if (outputFormat === "jpg" || outputFormat === "jpeg") {
+    convertTask.quality = Number.isFinite(jpgQuality) ? Math.max(1, Math.min(100, Math.floor(jpgQuality))) : 100;
+  }
+
+  const createJob = await cloudConvertApiRequest(
+    "/jobs",
+    apiKey,
+    {
+      method: "POST",
+      timeoutMs,
+      payload: {
+        tasks: {
+          import_raw: {
+            operation: "import/upload",
+          },
+          convert_raw: convertTask,
+          export_converted: {
+            operation: "export/url",
+            input: "convert_raw",
+            inline: true,
+          },
+        },
+      },
+    },
+  );
+  if (!createJob.ok) return createJob;
+
+  const job = createJob.data || {};
+  const jobId = String(job?.id || "").trim();
+  if (!jobId) {
+    return { ok: false, status: 502, error: "CloudConvert job creation returned no job id." };
+  }
+
+  const importTask = getTaskByNameOrOperation(job?.tasks, "import_raw", "import/upload");
+  let uploadForm = importTask?.result?.form || null;
+  let importTaskId = String(importTask?.id || "").trim();
+
+  if (!uploadForm && importTaskId) {
+    const taskResult = await cloudConvertApiRequest(`/tasks/${encodeURIComponent(importTaskId)}`, apiKey, { timeoutMs });
+    if (!taskResult.ok) return taskResult;
+    uploadForm = taskResult.data?.result?.form || null;
+  }
+  if (!uploadForm?.url || typeof uploadForm?.parameters !== "object") {
+    return { ok: false, status: 502, error: "CloudConvert upload form is missing." };
+  }
+
+  const formData = new FormData();
+  Object.entries(uploadForm.parameters).forEach(([key, value]) => {
+    formData.append(key, String(value));
+  });
+  formData.append("file", new Blob([buffer], { type: "application/octet-stream" }), fileName);
+
+  const uploadResponse = await fetch(String(uploadForm.url), {
+    method: "POST",
+    body: formData,
+    redirect: "follow",
+  }).catch(() => null);
+
+  if (!uploadResponse || !uploadResponse.ok) {
+    return { ok: false, status: uploadResponse?.status || 502, error: "CloudConvert upload step failed." };
+  }
+
+  const waitJob = await cloudConvertApiRequest(
+    `/jobs/${encodeURIComponent(jobId)}`,
+    apiKey,
+    { baseUrl: "https://sync.api.cloudconvert.com/v2", timeoutMs },
+  );
+  if (!waitJob.ok) return waitJob;
+  const finishedJob = waitJob.data || {};
+  if (String(finishedJob?.status || "").toLowerCase() === "error") {
+    return { ok: false, status: 502, error: "CloudConvert conversion job failed." };
+  }
+
+  const exportTask = getTaskByNameOrOperation(finishedJob?.tasks, "export_converted", "export/url");
+  const exportFile = Array.isArray(exportTask?.result?.files) ? exportTask.result.files[0] : null;
+  const downloadUrl = String(exportFile?.url || "").trim();
+  if (!downloadUrl) {
+    return { ok: false, status: 502, error: "CloudConvert did not return an output file URL." };
+  }
+
+  const outputResponse = await fetch(downloadUrl).catch(() => null);
+  if (!outputResponse || !outputResponse.ok) {
+    return { ok: false, status: outputResponse?.status || 502, error: "Unable to download CloudConvert output file." };
+  }
+  const outputBuffer = Buffer.from(await outputResponse.arrayBuffer());
+  if (!outputBuffer.length) {
+    return { ok: false, status: 502, error: "CloudConvert output file was empty." };
+  }
+  return {
+    ok: true,
+    buffer: outputBuffer,
+    mimeType: String(outputResponse.headers.get("content-type") || `image/${outputFormat}`),
+    fileName: String(exportFile?.filename || buildPreviewFileName(fileName)),
+  };
 }
 
 function extractJpegFromTiffPreview(buffer) {
@@ -1018,6 +1173,21 @@ async function handleRawPreview(req, res) {
     const body = await parseBinaryBody(req, 80 * 1024 * 1024);
     if (!body || body.length === 0) {
       return sendJson(res, 400, { error: "Missing RAW payload." });
+    }
+
+    const cloudConvertConfig = getCloudConvertConfig();
+    if (cloudConvertConfig.apiKey) {
+      const converted = await cloudConvertConvertRawToImage(body, fileName, cloudConvertConfig);
+      if (converted.ok && converted.buffer?.length) {
+        const mimeType = String(converted.mimeType || "image/jpeg");
+        const dataUrl = `data:${mimeType};base64,${converted.buffer.toString("base64")}`;
+        return sendJson(res, 200, {
+          ok: true,
+          fileName: sanitizeFileName(converted.fileName || buildPreviewFileName(fileName)),
+          mimeType,
+          dataUrl,
+        });
+      }
     }
 
     const jpegPreview = extractLargestEmbeddedJpeg(body) || extractJpegFromTiffPreview(body);
