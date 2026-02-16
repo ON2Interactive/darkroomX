@@ -24,7 +24,7 @@
           <div class="landing-pricing-copy">
             <h1>Pricing</h1>
             <p>No subscriptions. No expiring credits. Pay once, use anytime.</p>
-            <button id="pricingManageBillingBtn" class="landing-pricing-manage-btn" type="button">Manage Billing</button>
+            <button id="pricingManageBillingBtn" class="landing-pricing-manage-btn" type="button" hidden>Manage Billing</button>
           </div>
 
           <div class="landing-pricing-grid">
@@ -185,6 +185,19 @@
           window.location.href = portalUrl;
         };
 
+        const loadAccessStatus = async () => {
+          const token = getAuthToken();
+          if (!token) return null;
+          const response = await fetch("/api/access/status", {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (!response.ok) return null;
+          return response.json().catch(() => null);
+        };
+
         const subscribeBtnBasic = document.getElementById("pricingSubscribeBtnBasic");
         const subscribeBtnPro = document.getElementById("pricingSubscribeBtnPro");
         const topupBtn = document.getElementById("pricingTopupBtn");
@@ -208,6 +221,16 @@
         bindCheckout(subscribeBtnBasic, "/api/stripe/checkout/subscription");
         bindCheckout(subscribeBtnPro, "/api/stripe/checkout/subscription");
         bindCheckout(topupBtn, "/api/stripe/checkout/topup");
+        loadAccessStatus()
+          .then((status) => {
+            if (!manageBillingBtn) return;
+            const hasActiveSubscription = Boolean(status?.subscriptionActive);
+            manageBillingBtn.hidden = !hasActiveSubscription;
+          })
+          .catch(() => {
+            if (!manageBillingBtn) return;
+            manageBillingBtn.hidden = true;
+          });
         if (manageBillingBtn) {
           manageBillingBtn.addEventListener("click", async () => {
             manageBillingBtn.disabled = true;
