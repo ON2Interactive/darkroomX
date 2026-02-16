@@ -854,6 +854,20 @@ body {
   font-size: 1.05rem;
 }
 
+.landing-pricing-manage-btn {
+  margin-top: 20px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 0.94rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .landing-pricing-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -24,6 +24,7 @@
           <div class="landing-pricing-copy">
             <h1>Pricing</h1>
             <p>No subscriptions. No expiring credits. Pay once, use anytime.</p>
+            <button id="pricingManageBillingBtn" class="landing-pricing-manage-btn" type="button">Manage Billing</button>
           </div>
 
           <div class="landing-pricing-grid">
@@ -161,9 +162,33 @@
           window.location.href = checkoutUrl;
         };
 
+        const openBillingPortal = async () => {
+          const token = getAuthToken();
+          if (!token) {
+            window.location.href = "/signup";
+            return;
+          }
+          const response = await fetch("/api/stripe/billing-portal", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: "{}",
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || "Unable to open billing portal.");
+          }
+          const portalUrl = String(payload?.portalUrl || "");
+          if (!portalUrl) throw new Error("Missing billing portal URL.");
+          window.location.href = portalUrl;
+        };
+
         const subscribeBtnBasic = document.getElementById("pricingSubscribeBtnBasic");
         const subscribeBtnPro = document.getElementById("pricingSubscribeBtnPro");
         const topupBtn = document.getElementById("pricingTopupBtn");
+        const manageBillingBtn = document.getElementById("pricingManageBillingBtn");
 
         const bindCheckout = (button, endpoint) => {
           if (!button) return;
@@ -183,6 +208,18 @@
         bindCheckout(subscribeBtnBasic, "/api/stripe/checkout/subscription");
         bindCheckout(subscribeBtnPro, "/api/stripe/checkout/subscription");
         bindCheckout(topupBtn, "/api/stripe/checkout/topup");
+        if (manageBillingBtn) {
+          manageBillingBtn.addEventListener("click", async () => {
+            manageBillingBtn.disabled = true;
+            try {
+              await openBillingPortal();
+            } catch (error) {
+              window.alert(error?.message || "Unable to open billing portal.");
+            } finally {
+              manageBillingBtn.disabled = false;
+            }
+          });
+        }
       })();
     </script>
   </body>
