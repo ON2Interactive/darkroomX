@@ -379,7 +379,7 @@ const probeDecodableImageFile = (file) =>
   });
 
 const convertRawToPreviewFile = async (file) => {
-  if (!file || !isRawUploadFile(file)) return null;
+  if (!file || !isRawUploadFile(file)) return { file: null, error: "Not a RAW file." };
   try {
     const response = await authFetch("/api/raw-preview", {
       method: "POST",
@@ -390,15 +390,17 @@ const convertRawToPreviewFile = async (file) => {
       body: file,
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return { file: null, error: String(payload?.error || "RAW preview conversion failed.") };
+    }
 
     const dataUrl = String(payload?.dataUrl || "");
-    if (!dataUrl.startsWith("data:image/")) return null;
+    if (!dataUrl.startsWith("data:image/")) return { file: null, error: "RAW preview was missing image data." };
 
     const fileName = String(payload?.fileName || "").trim() || `${getFileExtension(file.name) || "raw"}-preview.jpg`;
-    return dataUrlToFile(dataUrl, fileName);
+    return { file: dataUrlToFile(dataUrl, fileName), error: "" };
   } catch {
-    return null;
+    return { file: null, error: "Unable to reach RAW conversion service." };
   }
 };
 
@@ -3878,14 +3880,16 @@ const handleFolderUpload = async (event) => {
   const rejectedFiles = decodeChecks.filter((item) => !item.decodable).map((item) => item.file);
   const convertedRawFiles = [];
   const unresolvedRejectedFiles = [];
+  const rawConversionErrors = [];
 
   for (const rejected of rejectedFiles) {
     if (isRawUploadFile(rejected)) {
-      const converted = await convertRawToPreviewFile(rejected);
-      if (converted) {
-        convertedRawFiles.push(converted);
+      const convertedResult = await convertRawToPreviewFile(rejected);
+      if (convertedResult.file) {
+        convertedRawFiles.push(convertedResult.file);
         continue;
       }
+      rawConversionErrors.push(`${rejected.name}: ${convertedResult.error || "Conversion failed."}`);
     }
     unresolvedRejectedFiles.push(rejected);
   }
@@ -3935,6 +3939,16 @@ const handleFolderUpload = async (event) => {
         unresolvedRejectedFiles
           .slice(0, 5)
           .map((file) => `- ${file.name}`)
+          .join("\n"),
+    );
+  }
+
+  if (rawConversionErrors.length > 0) {
+    window.alert(
+      "RAW conversion failed for:\n\n" +
+        rawConversionErrors
+          .slice(0, 5)
+          .map((line) => `- ${line}`)
           .join("\n"),
     );
   }

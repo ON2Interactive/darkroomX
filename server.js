@@ -873,6 +873,135 @@ function extractLargestEmbeddedJpeg(buffer) {
   return buffer.slice(largestStart, largestEnd);
 }
 
+function extractJpegFromTiffPreview(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 16) return null;
+  const byteOrder = buffer.toString("ascii", 0, 2);
+  const littleEndian = byteOrder === "II";
+  const bigEndian = byteOrder === "MM";
+  if (!littleEndian && !bigEndian) return null;
+
+  const readUInt16 = (offset) => (littleEndian ? buffer.readUInt16LE(offset) : buffer.readUInt16BE(offset));
+  const readUInt32 = (offset) => (littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset));
+
+  const magic = readUInt16(2);
+  if (magic !== 42) return null;
+
+  const firstIfd = readUInt32(4);
+  if (!Number.isFinite(firstIfd) || firstIfd <= 0 || firstIfd >= buffer.length - 2) return null;
+
+  const TYPE_SIZE = {
+    1: 1, // BYTE
+    2: 1, // ASCII
+    3: 2, // SHORT
+    4: 4, // LONG
+    5: 8, // RATIONAL
+    7: 1, // UNDEFINED
+    9: 4, // SLONG
+    10: 8, // SRATIONAL
+  };
+
+  const readEntryValues = (type, count, valueFieldOffset) => {
+    const size = TYPE_SIZE[type];
+    if (!size || !count) return [];
+    const byteLength = size * count;
+    let dataOffset = valueFieldOffset;
+    if (byteLength > 4) {
+      dataOffset = readUInt32(valueFieldOffset);
+    }
+    if (!Number.isFinite(dataOffset) || dataOffset < 0 || dataOffset + byteLength > buffer.length) return [];
+
+    const values = [];
+    for (let i = 0; i < count; i += 1) {
+      const itemOffset = dataOffset + i * size;
+      if (itemOffset + size > buffer.length) break;
+      if (type === 3) {
+        values.push(littleEndian ? buffer.readUInt16LE(itemOffset) : buffer.readUInt16BE(itemOffset));
+      } else if (type === 4 || type === 9) {
+        values.push(littleEndian ? buffer.readUInt32LE(itemOffset) : buffer.readUInt32BE(itemOffset));
+      } else if (type === 1 || type === 7) {
+        values.push(buffer[itemOffset]);
+      }
+    }
+    return values;
+  };
+
+  const extractJpegAt = (offset, length) => {
+    if (!Number.isFinite(offset) || !Number.isFinite(length)) return null;
+    if (offset < 0 || length <= 0 || offset + length > buffer.length) return null;
+    const slice = buffer.slice(offset, offset + length);
+    if (slice.length < 1024) return null;
+    const soi = slice.indexOf(Buffer.from([0xff, 0xd8]));
+    if (soi < 0) return null;
+    const eoi = slice.lastIndexOf(Buffer.from([0xff, 0xd9]));
+    if (eoi > soi) {
+      return slice.slice(soi, eoi + 2);
+    }
+    return slice.slice(soi);
+  };
+
+  const visited = new Set();
+  const queue = [firstIfd];
+  let best = null;
+  let safety = 0;
+
+  while (queue.length > 0 && safety < 128) {
+    safety += 1;
+    const ifdOffset = queue.shift();
+    if (!Number.isFinite(ifdOffset) || ifdOffset <= 0 || ifdOffset >= buffer.length - 2) continue;
+    if (visited.has(ifdOffset)) continue;
+    visited.add(ifdOffset);
+
+    const entryCount = readUInt16(ifdOffset);
+    const tableStart = ifdOffset + 2;
+    const tableEnd = tableStart + entryCount * 12;
+    if (tableEnd + 4 > buffer.length) continue;
+
+    const tags = new Map();
+    for (let i = 0; i < entryCount; i += 1) {
+      const entryOffset = tableStart + i * 12;
+      const tag = readUInt16(entryOffset);
+      const type = readUInt16(entryOffset + 2);
+      const count = readUInt32(entryOffset + 4);
+      const valueFieldOffset = entryOffset + 8;
+      tags.set(tag, { type, count, valueFieldOffset });
+    }
+
+    const jpegOffsetTag = tags.get(513);
+    const jpegLengthTag = tags.get(514);
+    if (jpegOffsetTag && jpegLengthTag) {
+      const offsetValues = readEntryValues(jpegOffsetTag.type, jpegOffsetTag.count, jpegOffsetTag.valueFieldOffset);
+      const lengthValues = readEntryValues(jpegLengthTag.type, jpegLengthTag.count, jpegLengthTag.valueFieldOffset);
+      const candidate = extractJpegAt(Number(offsetValues[0] || 0), Number(lengthValues[0] || 0));
+      if (candidate && (!best || candidate.length > best.length)) {
+        best = candidate;
+      }
+    }
+
+    const subIfdTag = tags.get(330);
+    if (subIfdTag) {
+      const subOffsets = readEntryValues(subIfdTag.type, subIfdTag.count, subIfdTag.valueFieldOffset);
+      subOffsets.forEach((off) => {
+        if (Number.isFinite(off) && off > 0) queue.push(off);
+      });
+    }
+
+    const exifIfdTag = tags.get(34665);
+    if (exifIfdTag) {
+      const exifOffsets = readEntryValues(exifIfdTag.type, exifIfdTag.count, exifIfdTag.valueFieldOffset);
+      exifOffsets.forEach((off) => {
+        if (Number.isFinite(off) && off > 0) queue.push(off);
+      });
+    }
+
+    const nextIfdOffset = readUInt32(tableEnd);
+    if (Number.isFinite(nextIfdOffset) && nextIfdOffset > 0) {
+      queue.push(nextIfdOffset);
+    }
+  }
+
+  return best;
+}
+
 async function handleRawPreview(req, res) {
   const auth = await getAuthenticatedSupabaseUser(req);
   if (!auth.ok) {
@@ -891,7 +1020,7 @@ async function handleRawPreview(req, res) {
       return sendJson(res, 400, { error: "Missing RAW payload." });
     }
 
-    const jpegPreview = extractLargestEmbeddedJpeg(body);
+    const jpegPreview = extractLargestEmbeddedJpeg(body) || extractJpegFromTiffPreview(body);
     if (!jpegPreview || jpegPreview.length < 1024) {
       return sendJson(res, 415, { error: "Could not extract preview image from RAW file." });
     }
