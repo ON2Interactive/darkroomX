@@ -203,6 +203,7 @@ const PROJECT_META_STORAGE_KEY = "darkroomx_active_project";
 const APP_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const CLOUD_AUTOSAVE_INTERVAL_MS = 60 * 1000;
 const APP_SESSION_EXPIRED_MESSAGE = "Your 24-hour app session ended. Please sign in again to continue.";
+const RAW_FILE_EXTENSIONS = new Set(["dng", "cr2", "cr3", "nef", "arw", "rw2", "orf", "raf", "pef", "srw", "x3f"]);
 const CREDIT_COSTS = {
   generate: 1,
   edit: 1,
@@ -342,6 +343,38 @@ const disposePhotoResources = (photo) => {
 const disposeAllPhotos = () => {
   state.photos.forEach((photo) => disposePhotoResources(photo));
 };
+
+const getFileExtension = (name = "") => {
+  const normalized = String(name || "").trim().toLowerCase();
+  const idx = normalized.lastIndexOf(".");
+  return idx >= 0 ? normalized.slice(idx + 1) : "";
+};
+
+const isAllowedUploadFile = (file) => {
+  if (!file) return false;
+  const mimeType = String(file.type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return true;
+  return RAW_FILE_EXTENSIONS.has(getFileExtension(file.name));
+};
+
+const probeDecodableImageFile = (file) =>
+  new Promise((resolve) => {
+    if (!file) {
+      resolve(false);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(true);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(false);
+    };
+    img.src = objectUrl;
+  });
 
 const setFilmstripSize = (height) => {
   const clampedHeight = clamp(height, 92, 320);
@@ -3801,16 +3834,39 @@ const loadImageDimensions = (photo) => {
   img.src = photo.url;
 };
 
-const handleFolderUpload = (event) => {
+const handleFolderUpload = async (event) => {
   const sourceInput = event.target;
-  const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/"));
+  const files = Array.from(event.target.files || []).filter((file) => isAllowedUploadFile(file));
   if (files.length === 0) {
     if (sourceInput) sourceInput.value = "";
     return;
   }
 
+  const decodeChecks = await Promise.all(
+    files.map(async (file) => ({
+      file,
+      decodable: await probeDecodableImageFile(file),
+    })),
+  );
+  const decodableFiles = decodeChecks.filter((item) => item.decodable).map((item) => item.file);
+  const rejectedFiles = decodeChecks.filter((item) => !item.decodable).map((item) => item.file);
+
+  if (decodableFiles.length === 0) {
+    if (rejectedFiles.length > 0) {
+      window.alert(
+        "These files could not be opened in this browser. RAW support depends on browser codecs.\n\n" +
+          rejectedFiles
+            .slice(0, 5)
+            .map((file) => `- ${file.name}`)
+            .join("\n"),
+      );
+    }
+    if (sourceInput) sourceInput.value = "";
+    return;
+  }
+
   const hadPhotos = state.photos.length > 0;
-  const newPhotos = files.map((file) => {
+  const newPhotos = decodableFiles.map((file) => {
     const photo = createPhotoRecord(file);
     loadImageDimensions(photo);
     return photo;
@@ -3826,6 +3882,16 @@ const handleFolderUpload = (event) => {
     selectPhoto(0);
   } else {
     renderFilmstrip();
+  }
+
+  if (rejectedFiles.length > 0) {
+    window.alert(
+      `${rejectedFiles.length} file(s) were skipped because this browser could not decode them.\n\n` +
+        rejectedFiles
+          .slice(0, 5)
+          .map((file) => `- ${file.name}`)
+          .join("\n"),
+    );
   }
 
   if (sourceInput) sourceInput.value = "";
