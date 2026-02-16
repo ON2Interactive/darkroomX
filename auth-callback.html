@@ -38,7 +38,6 @@
       (() => {
         const shellEl = document.getElementById("authCallbackShell");
         const statusEl = document.getElementById("authCallbackStatus");
-        let revealTimer = null;
 
         const showCallbackUi = () => {
           if (shellEl) shellEl.classList.add("is-visible");
@@ -47,11 +46,6 @@
         const updateStatus = (message) => {
           if (statusEl) statusEl.textContent = String(message || "");
         };
-
-        // Keep normal sign-in redirect visually clean; only show UI if there is an issue or delay.
-        revealTimer = window.setTimeout(() => {
-          showCallbackUi();
-        }, 1200);
 
         const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         const queryParams = new URLSearchParams(window.location.search || "");
@@ -107,7 +101,6 @@
               window.localStorage.setItem("darkroomx_active_project_id", payload.activeProject.id);
             }
 
-            if (revealTimer) window.clearTimeout(revealTimer);
             window.location.replace(payload?.redirectTo || "/pricing");
           })
           .catch((error) => {
