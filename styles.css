@@ -592,7 +592,7 @@ body {
   background-size: 24px 24px;
   background-position: 0 0, 0 0;
   min-height: 800px;
-  padding: 100px 20px 200px;
+  padding: 100px 20px 160px;
 }
 
 .landing-app-ui-inner {
@@ -663,7 +663,7 @@ body {
 .landing-features {
   background: linear-gradient(180deg, #0d0d0d 0%, #070707 100%);
   min-height: 800px;
-  padding: 100px 20px 200px;
+  padding: 100px 20px 160px;
 }
 
 .landing-features-inner {
@@ -768,7 +768,7 @@ body {
   background-size: 24px 24px;
   background-position: 0 0, 0 0;
   min-height: 800px;
-  padding: 100px 20px 200px;
+  padding: 100px 20px 160px;
 }
 
 .landing-users-inner {
@@ -879,7 +879,7 @@ body {
   grid-template-columns: minmax(320px, 30%) minmax(0, 70%);
   gap: 24px;
   align-items: stretch;
-  margin-bottom: 100px;
+  margin-bottom: 60px;
 }
 
 .landing-pricing-card {
@@ -1307,15 +1307,15 @@ body {
 
 @media (min-width: 781px) and (max-width: 1120px) {
   .landing-app-ui {
-    padding-bottom: 172px;
+    padding-bottom: 132px;
   }
 
   .landing-features {
-    padding-bottom: 172px;
+    padding-bottom: 132px;
   }
 
   .landing-users {
-    padding-bottom: 172px;
+    padding-bottom: 132px;
   }
 
   .landing-features-grid {
