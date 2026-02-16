@@ -64,7 +64,7 @@
               window.localStorage.setItem("darkroomx_active_project_id", payload.activeProject.id);
             }
 
-            window.location.replace(payload?.redirectTo || "/studio");
+            window.location.replace(payload?.redirectTo || "/pricing");
           })
           .catch((error) => {
             updateStatus(error?.message || "Unable to complete sign-in.");
