@@ -2470,6 +2470,32 @@ body {
   color: rgba(255, 255, 255, 0.62);
 }
 
+.settings-modal-share {
+  margin-top: auto;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.86);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.settings-modal-share .lucide {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-modal-share:hover {
+  color: rgba(255, 255, 255, 0.64);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
 .credits-modal-body {
   min-height: 0;
   padding: 0;

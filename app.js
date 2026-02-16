@@ -97,6 +97,7 @@ const settingsModalCloseBtn = document.getElementById("settingsModalCloseBtn");
 const settingsManageSubscriptionBtn = document.getElementById("settingsManageSubscriptionBtn");
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
 const settingsProjectsBtn = document.getElementById("settingsProjectsBtn");
+const settingsShareBtn = document.getElementById("settingsShareBtn");
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -3933,6 +3934,11 @@ settingsBuyCreditsBtn?.addEventListener("click", async () => {
 settingsProjectsBtn?.addEventListener("click", () => {
   closeSettingsModal();
   window.location.href = "/editor";
+});
+settingsShareBtn?.addEventListener("click", () => {
+  const subject = encodeURIComponent("Check out DarkroomX");
+  const body = encodeURIComponent("Check out DarkroomX: https://www.darkroomx.com");
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
 });
 settingsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === settingsModal) {
