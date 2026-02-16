@@ -874,6 +874,13 @@ body {
   gap: 20px;
 }
 
+.landing-pricing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
 .landing-pricing-card {
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -883,6 +890,10 @@ body {
   min-height: 520px;
   display: flex;
   flex-direction: column;
+}
+
+.landing-pricing-single-card {
+  min-height: 640px;
 }
 
 .landing-pricing-card h3 {
@@ -899,6 +910,13 @@ body {
   line-height: 1;
   text-align: center;
   color: var(--soft-white);
+}
+
+.landing-pricing-price span {
+  margin-left: 8px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.68);
 }
 
 .landing-pricing-credits {
@@ -947,6 +965,12 @@ body {
   background: transparent;
 }
 
+.landing-pricing-actions {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+}
+
 .landing-pricing-card.is-featured {
   border-color: rgba(255, 255, 255, 0.24);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
@@ -963,6 +987,70 @@ body {
   color: rgba(255, 255, 255, 0.9);
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+.pricing-slideshow {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 18px;
+  min-height: 640px;
+  overflow: hidden;
+  background: #090909;
+}
+
+.pricing-slideshow-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.pricing-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0;
+  transform: scale(1.03);
+  transition:
+    opacity 820ms ease,
+    transform 1800ms ease;
+}
+
+.pricing-slide.is-active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.pricing-slideshow::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 28%;
+  background: linear-gradient(180deg, rgba(7, 7, 7, 0) 0%, rgba(7, 7, 7, 0.72) 100%);
+  pointer-events: none;
+}
+
+.pricing-slideshow-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 8px;
+  z-index: 2;
+}
+
+.pricing-slideshow-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.pricing-slideshow-dots span.is-active {
+  background: rgba(255, 255, 255, 0.86);
 }
 
 .landing-footer {
@@ -1162,12 +1250,14 @@ body {
     font-size: 30px;
   }
 
-  .landing-pricing-grid {
+  .landing-pricing-grid,
+  .landing-pricing-layout {
     grid-template-columns: 1fr;
     gap: 14px;
   }
 
-  .landing-pricing-card {
+  .landing-pricing-card,
+  .landing-pricing-single-card {
     min-height: 0;
     padding: 24px 18px 20px;
   }
@@ -1182,6 +1272,10 @@ body {
 
   .landing-pricing-credits {
     font-size: 1.15rem;
+  }
+
+  .pricing-slideshow {
+    min-height: 420px;
   }
 
   .landing-footer {
@@ -1217,6 +1311,14 @@ body {
 
   .landing-pricing-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-pricing-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pricing-slideshow {
+    min-height: 520px;
   }
 }
 
