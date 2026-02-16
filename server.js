@@ -327,7 +327,7 @@ async function hasActiveSubscriptionForCustomer(secretKey, customerId, subscript
 async function ensureUserHasActiveSubscription(req, user) {
   const config = getStripeConfig(req);
   if (!config.secretKey || !config.subscriptionPriceId) {
-    return { ok: true, active: true, enforced: false };
+    return { ok: true, active: false, enforced: true };
   }
 
   const userId = String(user?.id || "").trim();
