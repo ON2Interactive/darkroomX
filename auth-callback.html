@@ -6,9 +6,27 @@
     <title>Signing In - DarkroomX</title>
     <link rel="icon" type="image/svg+xml" href="/assets/darkroomx-favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
+    <style>
+      body.auth-callback-page {
+        margin: 0;
+        background: #050505;
+        color: #f4f4f4;
+      }
+
+      .auth-callback-shell {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 160ms ease;
+      }
+
+      .auth-callback-shell.is-visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+    </style>
   </head>
-  <body class="signup-page">
-    <main class="signup-shell">
+  <body class="signup-page auth-callback-page">
+    <main class="signup-shell auth-callback-shell" id="authCallbackShell">
       <section class="signup-card" aria-label="Auth callback">
         <img src="/assets/darkroomx-logo-white.svg" alt="DarkroomX" class="signup-logo" />
         <h1>Signing you in...</h1>
@@ -18,11 +36,22 @@
     </main>
     <script>
       (() => {
+        const shellEl = document.getElementById("authCallbackShell");
         const statusEl = document.getElementById("authCallbackStatus");
+        let revealTimer = null;
+
+        const showCallbackUi = () => {
+          if (shellEl) shellEl.classList.add("is-visible");
+        };
 
         const updateStatus = (message) => {
           if (statusEl) statusEl.textContent = String(message || "");
         };
+
+        // Keep normal sign-in redirect visually clean; only show UI if there is an issue or delay.
+        revealTimer = window.setTimeout(() => {
+          showCallbackUi();
+        }, 1200);
 
         const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         const queryParams = new URLSearchParams(window.location.search || "");
@@ -33,11 +62,13 @@
         const expiresAt = Number(hashParams.get("expires_at") || "0");
 
         if (oauthError) {
+          showCallbackUi();
           updateStatus(`Sign-in failed: ${oauthError}`);
           return;
         }
 
         if (!accessToken) {
+          showCallbackUi();
           updateStatus("Missing auth token. Please try signing in again.");
           return;
         }
@@ -75,9 +106,11 @@
               window.localStorage.setItem("darkroomx_active_project_id", payload.activeProject.id);
             }
 
+            if (revealTimer) window.clearTimeout(revealTimer);
             window.location.replace(payload?.redirectTo || "/pricing");
           })
           .catch((error) => {
+            showCallbackUi();
             updateStatus(error?.message || "Unable to complete sign-in.");
           });
       })();
