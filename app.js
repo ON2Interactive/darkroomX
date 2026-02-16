@@ -98,6 +98,7 @@ const settingsManageSubscriptionBtn = document.getElementById("settingsManageSub
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
 const settingsProjectsBtn = document.getElementById("settingsProjectsBtn");
 const settingsShareBtn = document.getElementById("settingsShareBtn");
+const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn, settingsProjectsBtn].filter(Boolean);
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -2114,6 +2115,9 @@ const openSettingsModal = () => {
   if (!settingsModal) return;
   settingsModal.classList.remove("hidden-panel");
   hydrateIcons();
+  window.requestAnimationFrame(() => {
+    settingsLinkButtons[0]?.focus();
+  });
 };
 
 const closeSettingsModal = () => {
@@ -3943,6 +3947,24 @@ settingsShareBtn?.addEventListener("click", () => {
 settingsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === settingsModal) {
     closeSettingsModal();
+  }
+});
+settingsModal?.addEventListener("keydown", (event) => {
+  if (settingsModal.classList.contains("hidden-panel")) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSettingsModal();
+    return;
+  }
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && settingsLinkButtons.length > 0) {
+    const currentIndex = settingsLinkButtons.indexOf(document.activeElement);
+    if (currentIndex < 0) return;
+    event.preventDefault();
+    const nextIndex =
+      event.key === "ArrowDown"
+        ? (currentIndex + 1) % settingsLinkButtons.length
+        : (currentIndex - 1 + settingsLinkButtons.length) % settingsLinkButtons.length;
+    settingsLinkButtons[nextIndex]?.focus();
   }
 });
 

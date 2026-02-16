@@ -2412,6 +2412,7 @@ body {
   background: #0f0f0f;
   grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
   grid-template-rows: 1fr;
+  animation: settingsPanelIn 280ms ease-out;
 }
 
 .settings-modal-backdrop {
@@ -2432,6 +2433,9 @@ body {
   object-fit: cover;
   object-position: center;
   display: block;
+  opacity: 0;
+  transform: scale(1.02);
+  animation: settingsImageIn 720ms ease forwards 90ms;
 }
 
 .settings-modal-content {
@@ -2463,6 +2467,9 @@ body {
   height: auto;
   display: block;
   margin: 0 0 60px;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: settingsContentIn 360ms ease forwards 120ms;
 }
 
 .settings-modal-links {
@@ -2473,6 +2480,7 @@ body {
 }
 
 .settings-modal-link {
+  position: relative;
   border: 0;
   background: transparent;
   color: rgba(255, 255, 255, 0.86);
@@ -2482,10 +2490,47 @@ body {
   line-height: 1.2;
   cursor: pointer;
   text-align: left;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: settingsContentIn 360ms ease forwards;
+}
+
+.settings-modal-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.7);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms ease;
 }
 
 .settings-modal-link:hover {
   color: rgba(255, 255, 255, 0.62);
+}
+
+.settings-modal-link:hover::after,
+.settings-modal-link:focus-visible::after {
+  transform: scaleX(1);
+}
+
+.settings-modal-link:focus-visible {
+  outline: none;
+}
+
+.settings-modal-links .settings-modal-link:nth-child(1) {
+  animation-delay: 160ms;
+}
+
+.settings-modal-links .settings-modal-link:nth-child(2) {
+  animation-delay: 220ms;
+}
+
+.settings-modal-links .settings-modal-link:nth-child(3) {
+  animation-delay: 280ms;
 }
 
 .settings-modal-share {
@@ -2503,6 +2548,9 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: settingsContentIn 360ms ease forwards 340ms;
 }
 
 .settings-modal-share .lucide {
@@ -2512,6 +2560,37 @@ body {
 
 .settings-modal-share:hover {
   color: rgba(255, 255, 255, 0.66);
+}
+
+@keyframes settingsPanelIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes settingsImageIn {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes settingsContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .credits-modal-body {
