@@ -357,6 +357,8 @@ const isAllowedUploadFile = (file) => {
   return RAW_FILE_EXTENSIONS.has(getFileExtension(file.name));
 };
 
+const isRawUploadFile = (file) => RAW_FILE_EXTENSIONS.has(getFileExtension(file?.name || ""));
+
 const probeDecodableImageFile = (file) =>
   new Promise((resolve) => {
     if (!file) {
@@ -375,6 +377,30 @@ const probeDecodableImageFile = (file) =>
     };
     img.src = objectUrl;
   });
+
+const convertRawToPreviewFile = async (file) => {
+  if (!file || !isRawUploadFile(file)) return null;
+  try {
+    const response = await authFetch("/api/raw-preview", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-File-Name": encodeURIComponent(file.name || "raw-image"),
+      },
+      body: file,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+
+    const dataUrl = String(payload?.dataUrl || "");
+    if (!dataUrl.startsWith("data:image/")) return null;
+
+    const fileName = String(payload?.fileName || "").trim() || `${getFileExtension(file.name) || "raw"}-preview.jpg`;
+    return dataUrlToFile(dataUrl, fileName);
+  } catch {
+    return null;
+  }
+};
 
 const setFilmstripSize = (height) => {
   const clampedHeight = clamp(height, 92, 320);
@@ -3850,12 +3876,27 @@ const handleFolderUpload = async (event) => {
   );
   const decodableFiles = decodeChecks.filter((item) => item.decodable).map((item) => item.file);
   const rejectedFiles = decodeChecks.filter((item) => !item.decodable).map((item) => item.file);
+  const convertedRawFiles = [];
+  const unresolvedRejectedFiles = [];
 
-  if (decodableFiles.length === 0) {
-    if (rejectedFiles.length > 0) {
+  for (const rejected of rejectedFiles) {
+    if (isRawUploadFile(rejected)) {
+      const converted = await convertRawToPreviewFile(rejected);
+      if (converted) {
+        convertedRawFiles.push(converted);
+        continue;
+      }
+    }
+    unresolvedRejectedFiles.push(rejected);
+  }
+
+  const importFiles = [...decodableFiles, ...convertedRawFiles];
+
+  if (importFiles.length === 0) {
+    if (unresolvedRejectedFiles.length > 0) {
       window.alert(
-        "These files could not be opened in this browser. RAW support depends on browser codecs.\n\n" +
-          rejectedFiles
+        "These files could not be opened.\n\n" +
+          unresolvedRejectedFiles
             .slice(0, 5)
             .map((file) => `- ${file.name}`)
             .join("\n"),
@@ -3866,7 +3907,7 @@ const handleFolderUpload = async (event) => {
   }
 
   const hadPhotos = state.photos.length > 0;
-  const newPhotos = decodableFiles.map((file) => {
+  const newPhotos = importFiles.map((file) => {
     const photo = createPhotoRecord(file);
     loadImageDimensions(photo);
     return photo;
@@ -3884,10 +3925,14 @@ const handleFolderUpload = async (event) => {
     renderFilmstrip();
   }
 
-  if (rejectedFiles.length > 0) {
+  if (convertedRawFiles.length > 0) {
+    window.alert(`${convertedRawFiles.length} RAW file(s) were converted to JPEG preview for editing.`);
+  }
+
+  if (unresolvedRejectedFiles.length > 0) {
     window.alert(
-      `${rejectedFiles.length} file(s) were skipped because this browser could not decode them.\n\n` +
-        rejectedFiles
+      `${unresolvedRejectedFiles.length} file(s) were skipped because they could not be decoded.\n\n` +
+        unresolvedRejectedFiles
           .slice(0, 5)
           .map((file) => `- ${file.name}`)
           .join("\n"),

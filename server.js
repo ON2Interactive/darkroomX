@@ -43,6 +43,7 @@ const MIME_BY_EXT = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
+const RAW_FILE_EXTENSIONS = new Set(["dng", "cr2", "cr3", "nef", "arw", "rw2", "orf", "raf", "pef", "srw", "x3f"]);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -796,6 +797,115 @@ function parseJsonBody(req, maxBytes = 64 * 1024) {
       reject(new Error(error?.message || "Request stream error."));
     });
   });
+}
+
+function parseBinaryBody(req, maxBytes = 80 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    let closed = false;
+    req.on("data", (chunk) => {
+      if (closed) return;
+      const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += part.length;
+      if (total > maxBytes) {
+        closed = true;
+        reject(new Error("Request payload too large."));
+        req.destroy();
+        return;
+      }
+      chunks.push(part);
+    });
+    req.on("end", () => {
+      if (closed) return;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (error) => {
+      if (closed) return;
+      reject(new Error(error?.message || "Request stream error."));
+    });
+  });
+}
+
+function getFileExtension(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const idx = normalized.lastIndexOf(".");
+  return idx >= 0 ? normalized.slice(idx + 1) : "";
+}
+
+function isLikelyRawFileName(value = "") {
+  return RAW_FILE_EXTENSIONS.has(getFileExtension(value));
+}
+
+function sanitizeFileName(value = "") {
+  const normalized = String(value || "").trim().replace(/[\\/:*?"<>|]+/g, "-");
+  return normalized.slice(0, 180) || "raw-image";
+}
+
+function buildPreviewFileName(rawName = "") {
+  const safe = sanitizeFileName(rawName);
+  const dot = safe.lastIndexOf(".");
+  const stem = dot > 0 ? safe.slice(0, dot) : safe;
+  return `${stem}-preview.jpg`;
+}
+
+function extractLargestEmbeddedJpeg(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return null;
+
+  let largestStart = -1;
+  let largestEnd = -1;
+  let cursor = 0;
+
+  while (cursor < buffer.length - 1) {
+    const soi = buffer.indexOf(Buffer.from([0xff, 0xd8]), cursor);
+    if (soi < 0) break;
+    const eoi = buffer.indexOf(Buffer.from([0xff, 0xd9]), soi + 2);
+    if (eoi < 0) break;
+    const endExclusive = eoi + 2;
+    if (largestStart < 0 || endExclusive - soi > largestEnd - largestStart) {
+      largestStart = soi;
+      largestEnd = endExclusive;
+    }
+    cursor = endExclusive;
+  }
+
+  if (largestStart < 0 || largestEnd <= largestStart) return null;
+  return buffer.slice(largestStart, largestEnd);
+}
+
+async function handleRawPreview(req, res) {
+  const auth = await getAuthenticatedSupabaseUser(req);
+  if (!auth.ok) {
+    return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
+  }
+
+  try {
+    const rawFileNameHeader = String(req.headers["x-file-name"] || "");
+    const fileName = sanitizeFileName(decodeURIComponent(rawFileNameHeader || "raw-image"));
+    if (!isLikelyRawFileName(fileName)) {
+      return sendJson(res, 400, { error: "Unsupported RAW filename." });
+    }
+
+    const body = await parseBinaryBody(req, 80 * 1024 * 1024);
+    if (!body || body.length === 0) {
+      return sendJson(res, 400, { error: "Missing RAW payload." });
+    }
+
+    const jpegPreview = extractLargestEmbeddedJpeg(body);
+    if (!jpegPreview || jpegPreview.length < 1024) {
+      return sendJson(res, 415, { error: "Could not extract preview image from RAW file." });
+    }
+
+    const dataUrl = `data:image/jpeg;base64,${jpegPreview.toString("base64")}`;
+    return sendJson(res, 200, {
+      ok: true,
+      fileName: buildPreviewFileName(fileName),
+      mimeType: "image/jpeg",
+      dataUrl,
+    });
+  } catch (error) {
+    return sendJson(res, 500, { error: error?.message || "Unable to process RAW file." });
+  }
 }
 
 function getSupabaseServiceHeaders(req, prefer = "") {
@@ -2867,6 +2977,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/image-generate") {
     handleNanoBananaGenerate(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/raw-preview") {
+    handleRawPreview(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/peecho/print-order") {
