@@ -95,8 +95,8 @@ const creditsModalBuyBtn = document.getElementById("creditsModalBuyBtn");
 const settingsModal = document.getElementById("settingsModal");
 const settingsModalCloseBtn = document.getElementById("settingsModalCloseBtn");
 const settingsManageSubscriptionBtn = document.getElementById("settingsManageSubscriptionBtn");
-const settingsSubscribeBtn = document.getElementById("settingsSubscribeBtn");
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
+const settingsProjectsBtn = document.getElementById("settingsProjectsBtn");
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -3920,16 +3920,6 @@ settingsManageSubscriptionBtn?.addEventListener("click", async () => {
     settingsManageSubscriptionBtn.disabled = false;
   }
 });
-settingsSubscribeBtn?.addEventListener("click", async () => {
-  settingsSubscribeBtn.disabled = true;
-  try {
-    await beginStripeCheckout("subscription");
-  } catch (error) {
-    window.alert(error?.message || "Unable to open checkout.");
-  } finally {
-    settingsSubscribeBtn.disabled = false;
-  }
-});
 settingsBuyCreditsBtn?.addEventListener("click", async () => {
   settingsBuyCreditsBtn.disabled = true;
   try {
@@ -3939,6 +3929,10 @@ settingsBuyCreditsBtn?.addEventListener("click", async () => {
   } finally {
     settingsBuyCreditsBtn.disabled = false;
   }
+});
+settingsProjectsBtn?.addEventListener("click", () => {
+  closeSettingsModal();
+  window.location.href = "/editor";
 });
 settingsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === settingsModal) {
