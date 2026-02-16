@@ -41,7 +41,6 @@
               <p class="landing-pricing-note">Start with a free trial, then subscribe to keep full access. Top up credits as needed.</p>
               <div class="landing-pricing-actions">
                 <a href="#" id="pricingSubscribeBtn" class="landing-pricing-btn">Start Free Trial</a>
-                <a href="#" id="pricingTopupBtn" class="landing-pricing-btn">Buy 100 Credits</a>
               </div>
             </article>
 
@@ -191,7 +190,6 @@
         };
 
         const subscribeBtn = document.getElementById("pricingSubscribeBtn");
-        const topupBtn = document.getElementById("pricingTopupBtn");
         const manageBillingBtn = document.getElementById("pricingManageBillingBtn");
 
         const bindCheckout = (button, endpoint) => {
@@ -210,7 +208,6 @@
         };
 
         bindCheckout(subscribeBtn, "/api/stripe/checkout/subscription");
-        bindCheckout(topupBtn, "/api/stripe/checkout/topup");
 
         const slideshowTrack = document.getElementById("pricingSlideshowTrack");
         const slideEls = slideshowTrack ? Array.from(slideshowTrack.querySelectorAll(".pricing-slide")) : [];

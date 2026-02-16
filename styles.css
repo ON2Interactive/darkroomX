@@ -826,7 +826,7 @@ body {
 .landing-pricing {
   background: linear-gradient(180deg, #0d0d0d 0%, #070707 100%);
   min-height: 800px;
-  padding: 100px 20px;
+  padding: 100px 20px 100px;
 }
 
 .landing-pricing-inner {
