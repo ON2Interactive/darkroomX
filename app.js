@@ -197,7 +197,12 @@ const PROFILE_STORAGE_KEY = "darkroomx_profile";
 const AUTH_TOKEN_STORAGE_KEY = "darkroomx_auth_token";
 const REFRESH_TOKEN_STORAGE_KEY = "darkroomx_refresh_token";
 const AUTH_EXPIRES_AT_STORAGE_KEY = "darkroomx_auth_expires_at";
+const APP_SESSION_STARTED_AT_STORAGE_KEY = "darkroomx_app_session_started_at";
+const SESSION_RECOVERY_STORAGE_KEY = "darkroomx_session_recovery";
 const PROJECT_META_STORAGE_KEY = "darkroomx_active_project";
+const APP_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const CLOUD_AUTOSAVE_INTERVAL_MS = 60 * 1000;
+const APP_SESSION_EXPIRED_MESSAGE = "Your 24-hour app session ended. Please sign in again to continue.";
 const CREDIT_COSTS = {
   generate: 1,
   edit: 1,
@@ -279,6 +284,9 @@ const state = {
   currentProjectId: null,
   currentProjectName: "",
   projectsLoaded: false,
+  projectAutosaveTimer: null,
+  autosaveInFlight: false,
+  lastAutosaveDigest: "",
 };
 
 const hydrateIcons = () => {
@@ -538,6 +546,38 @@ const getAuthExpiresAtMs = () => {
   }
 };
 
+const getAppSessionStartedAtMs = () => {
+  try {
+    const raw = Number(window.localStorage.getItem(APP_SESSION_STARTED_AT_STORAGE_KEY) || "0");
+    return Number.isFinite(raw) ? raw : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const markAppSessionStarted = (timestampMs = Date.now()) => {
+  try {
+    window.localStorage.setItem(APP_SESSION_STARTED_AT_STORAGE_KEY, String(Math.max(0, Number(timestampMs) || Date.now())));
+  } catch {
+    // Ignore storage issues.
+  }
+};
+
+const ensureAppSessionStartedAt = () => {
+  const hasAuth = Boolean(getAuthToken() || getRefreshToken());
+  if (!hasAuth) return;
+  const startedAtMs = getAppSessionStartedAtMs();
+  if (!startedAtMs) {
+    markAppSessionStarted();
+  }
+};
+
+const isAppSessionExpired = () => {
+  const startedAtMs = getAppSessionStartedAtMs();
+  if (!startedAtMs) return false;
+  return Date.now() - startedAtMs >= APP_SESSION_TTL_MS;
+};
+
 let authRefreshPromise = null;
 let hasHandledExpiredAuthSession = false;
 
@@ -552,6 +592,9 @@ const storeAuthSession = ({ accessToken = "", refreshToken = "", expiresIn = 0 }
     if (Number.isFinite(expiresMs) && expiresMs > 0) {
       window.localStorage.setItem(AUTH_EXPIRES_AT_STORAGE_KEY, String(Date.now() + expiresMs * 1000));
     }
+    if (!getAppSessionStartedAtMs()) {
+      markAppSessionStarted();
+    }
   } catch {
     // Ignore storage issues.
   }
@@ -563,6 +606,7 @@ const clearAuthSession = () => {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
     window.localStorage.removeItem(AUTH_EXPIRES_AT_STORAGE_KEY);
+    window.localStorage.removeItem(APP_SESSION_STARTED_AT_STORAGE_KEY);
     window.localStorage.removeItem(PROFILE_STORAGE_KEY);
   } catch {
     // Ignore storage issues.
@@ -570,6 +614,7 @@ const clearAuthSession = () => {
 };
 
 const refreshAuthSession = async (force = false) => {
+  if (isAppSessionExpired()) return "";
   const refreshToken = getRefreshToken();
   if (!refreshToken) return "";
   if (authRefreshPromise) return authRefreshPromise;
@@ -608,15 +653,45 @@ const getJsonRequestHeaders = () => {
   };
 };
 
+const createClientJsonResponse = (status, payload) =>
+  new Response(JSON.stringify(payload || {}), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
+const persistSessionRecoverySnapshot = async () => {
+  if (!Array.isArray(state.photos) || state.photos.length === 0) return;
+  try {
+    const session = await getSerializedProjectPayload();
+    const payload = {
+      savedAt: new Date().toISOString(),
+      projectId: String(state.currentProjectId || ""),
+      projectName: String(state.currentProjectName || ""),
+      session,
+    };
+    window.localStorage.setItem(SESSION_RECOVERY_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore snapshot backup failures.
+  }
+};
+
 const handleExpiredAuthSession = (message = "Your session expired. Please sign in again.") => {
   if (hasHandledExpiredAuthSession) return;
   hasHandledExpiredAuthSession = true;
-  clearAuthSession();
-  window.alert(message);
-  window.location.href = "/signup";
+  void (async () => {
+    await persistSessionRecoverySnapshot();
+    clearAuthSession();
+    window.alert(message);
+    window.location.href = "/signup";
+  })();
 };
 
 const authFetch = async (url, options = {}) => {
+  ensureAppSessionStartedAt();
+  if (isAppSessionExpired()) {
+    handleExpiredAuthSession(APP_SESSION_EXPIRED_MESSAGE);
+    return createClientJsonResponse(401, { error: APP_SESSION_EXPIRED_MESSAGE });
+  }
   let token = await refreshAuthSession(false);
   if (!token) token = getAuthToken();
 
@@ -2488,6 +2563,31 @@ const restoreProjectFromPayload = async (payload) => {
   selectPhoto(selectedIndex >= 0 ? selectedIndex : 0);
 };
 
+const restoreRecoveredSessionIfAvailable = async () => {
+  try {
+    if (state.photos.length > 0) return;
+    const raw = window.localStorage.getItem(SESSION_RECOVERY_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const session = parsed?.session;
+    if (!session || typeof session !== "object") return;
+    await restoreProjectFromPayload(session);
+    const recoveredProjectId = String(parsed?.projectId || "").trim();
+    const recoveredProjectName = sanitizeProjectName(parsed?.projectName || "");
+    if (recoveredProjectId) {
+      persistCurrentProjectMeta({
+        id: recoveredProjectId,
+        name: recoveredProjectName,
+      });
+    }
+    state.lastAutosaveDigest = "";
+    window.localStorage.removeItem(SESSION_RECOVERY_STORAGE_KEY);
+    setSettingsProjectsStatus("Recovered your last unsaved session.");
+  } catch {
+    // Ignore corrupt recovery payloads.
+  }
+};
+
 const handleProjectLoad = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -2620,12 +2720,14 @@ const refreshProjectsFromCloud = async () => {
   }
 };
 
-const ensureProjectForSave = async () => {
+const ensureProjectForSave = async ({ silent = false } = {}) => {
   if (state.currentProjectId) {
     return { id: state.currentProjectId, name: state.currentProjectName || sanitizeProjectName(settingsProjectNameInput?.value || "") };
   }
   if (!getAuthToken() && !getRefreshToken()) {
-    window.location.href = "/signup";
+    if (!silent) {
+      window.location.href = "/signup";
+    }
     return null;
   }
   const fallbackName = `Session ${new Date().toISOString().slice(0, 10)}`;
@@ -2638,7 +2740,9 @@ const ensureProjectForSave = async () => {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401) {
-      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      if (!silent) {
+        handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      }
       return null;
     }
     throw new Error(payload?.error || "Unable to create project.");
@@ -2652,6 +2756,7 @@ const saveCurrentSessionToCloudProject = async () => {
   const ensured = await ensureProjectForSave();
   if (!ensured?.id) return;
   const payload = await getSerializedProjectPayload();
+  const payloadDigest = getSessionPayloadDigest(payload);
   const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
   const response = await authFetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
     method: "PUT",
@@ -2670,8 +2775,67 @@ const saveCurrentSessionToCloudProject = async () => {
     throw new Error(result?.error || "Unable to save project.");
   }
   persistCurrentProjectMeta({ id: ensured.id, name: projectName || ensured.name });
+  state.lastAutosaveDigest = payloadDigest;
   setSettingsProjectsStatus(`Saved ${projectName || ensured.name || "project"}.`);
   await refreshProjectsFromCloud();
+};
+
+const getSessionPayloadDigest = (payload) => {
+  if (!payload || typeof payload !== "object") return "";
+  try {
+    const normalized = {
+      ...payload,
+      savedAt: null,
+    };
+    return JSON.stringify(normalized);
+  } catch {
+    return "";
+  }
+};
+
+const runCloudAutosave = async () => {
+  if (state.autosaveInFlight) return;
+  if (!Array.isArray(state.photos) || state.photos.length === 0) return;
+  if (isAppSessionExpired()) return;
+  if (!getAuthToken() && !getRefreshToken()) return;
+
+  state.autosaveInFlight = true;
+  try {
+    const payload = await getSerializedProjectPayload();
+    const digest = getSessionPayloadDigest(payload);
+    if (digest && digest === state.lastAutosaveDigest) return;
+
+    const ensured = await ensureProjectForSave({ silent: true });
+    if (!ensured?.id) return;
+
+    const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
+    const response = await authFetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
+      method: "PUT",
+      headers: getJsonRequestHeaders(),
+      body: JSON.stringify({
+        name: projectName || ensured.name,
+        session: payload,
+      }),
+    });
+    if (!response.ok) return;
+    state.lastAutosaveDigest = digest;
+    if (window.localStorage.getItem(SESSION_RECOVERY_STORAGE_KEY)) {
+      window.localStorage.removeItem(SESSION_RECOVERY_STORAGE_KEY);
+    }
+  } catch {
+    // Keep autosave silent in background.
+  } finally {
+    state.autosaveInFlight = false;
+  }
+};
+
+const startCloudAutosave = () => {
+  if (state.projectAutosaveTimer) {
+    window.clearInterval(state.projectAutosaveTimer);
+  }
+  state.projectAutosaveTimer = window.setInterval(() => {
+    void runCloudAutosave();
+  }, CLOUD_AUTOSAVE_INTERVAL_MS);
 };
 
 const createFreshCloudProject = async () => {
@@ -2700,6 +2864,7 @@ const createFreshCloudProject = async () => {
   clearSelectionUI();
   const project = payload?.project || {};
   persistCurrentProjectMeta({ id: project.id || "", name: project.name || name });
+  state.lastAutosaveDigest = "";
   setSettingsProjectsStatus(`Created ${project.name || name}.`);
   await refreshProjectsFromCloud();
 };
@@ -4717,5 +4882,12 @@ syncHistoryControls();
 syncWorkspacePanCursor();
 syncCreditsUI();
 loadStoredProjectMeta();
+ensureAppSessionStartedAt();
 hydrateIcons();
 startAccessStatusPolling();
+startCloudAutosave();
+void restoreRecoveredSessionIfAvailable();
+
+window.addEventListener("beforeunload", () => {
+  void runCloudAutosave();
+});

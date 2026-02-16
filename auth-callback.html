@@ -87,6 +87,7 @@
 
             // Keep lightweight client context for future user-aware UI work.
             window.localStorage.setItem("darkroomx_auth_token", accessToken);
+            window.localStorage.setItem("darkroomx_app_session_started_at", String(Date.now()));
             if (refreshToken) {
               window.localStorage.setItem("darkroomx_refresh_token", refreshToken);
             }
