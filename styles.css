@@ -879,6 +879,7 @@ body {
   grid-template-columns: minmax(320px, 30%) minmax(0, 70%);
   gap: 24px;
   align-items: stretch;
+  margin-bottom: 100px;
 }
 
 .landing-pricing-card {
@@ -1256,6 +1257,10 @@ body {
     gap: 14px;
   }
 
+  .landing-pricing-layout {
+    margin-bottom: 56px;
+  }
+
   .landing-pricing-card,
   .landing-pricing-single-card {
     min-height: 0;
@@ -1315,6 +1320,7 @@ body {
 
   .landing-pricing-layout {
     grid-template-columns: minmax(0, 1fr);
+    margin-bottom: 72px;
   }
 
   .pricing-slideshow {
