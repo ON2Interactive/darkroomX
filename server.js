@@ -1765,6 +1765,48 @@ function handleSupabaseAuthBootstrap(req, res) {
   });
 }
 
+function handleSupabaseAuthRefresh(req, res) {
+  let raw = "";
+  req.on("data", (chunk) => {
+    raw += chunk;
+    if (raw.length > 64 * 1024) req.destroy();
+  });
+
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(raw || "{}");
+      const refreshToken = String(payload?.refreshToken || "").trim();
+      if (!refreshToken) {
+        return sendJson(res, 400, { error: "Missing refresh token." });
+      }
+
+      const config = getSupabaseConfig(req);
+      if (!config.url || !config.anonKey) {
+        return sendJson(res, 500, { error: "Supabase auth is not configured." });
+      }
+
+      const response = await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: createSupabaseRequestHeaders({ apiKey: config.anonKey }),
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return sendJson(res, response.status || 401, { error: data?.error_description || data?.error || "Unable to refresh auth session." });
+      }
+
+      return sendJson(res, 200, {
+        ok: true,
+        accessToken: String(data?.access_token || ""),
+        refreshToken: String(data?.refresh_token || ""),
+        expiresIn: Number(data?.expires_in || 0),
+      });
+    } catch (error) {
+      return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+    }
+  });
+}
+
 async function handleAccessStatus(req, res) {
   const authResult = await getAuthenticatedSupabaseUser(req);
   if (!authResult.ok) {
@@ -2749,6 +2791,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/auth/bootstrap") {
     handleSupabaseAuthBootstrap(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/auth/refresh") {
+    handleSupabaseAuthRefresh(req, res);
     return;
   }
   if (req.method === "GET" && pathname === "/api/access/status") {

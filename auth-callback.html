@@ -28,6 +28,9 @@
         const queryParams = new URLSearchParams(window.location.search || "");
         const oauthError = hashParams.get("error_description") || hashParams.get("error") || queryParams.get("error_description") || queryParams.get("error");
         const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const expiresIn = Number(hashParams.get("expires_in") || "0");
+        const expiresAt = Number(hashParams.get("expires_at") || "0");
 
         if (oauthError) {
           updateStatus(`Sign-in failed: ${oauthError}`);
@@ -53,6 +56,14 @@
 
             // Keep lightweight client context for future user-aware UI work.
             window.localStorage.setItem("darkroomx_auth_token", accessToken);
+            if (refreshToken) {
+              window.localStorage.setItem("darkroomx_refresh_token", refreshToken);
+            }
+            if (Number.isFinite(expiresAt) && expiresAt > 0) {
+              window.localStorage.setItem("darkroomx_auth_expires_at", String(expiresAt * 1000));
+            } else if (Number.isFinite(expiresIn) && expiresIn > 0) {
+              window.localStorage.setItem("darkroomx_auth_expires_at", String(Date.now() + expiresIn * 1000));
+            }
             if (payload?.profile) {
               window.localStorage.setItem("darkroomx_profile", JSON.stringify(payload.profile));
               const profileCredits = Number(payload?.profile?.creditsBalance);

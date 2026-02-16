@@ -195,6 +195,8 @@ const DEFAULT_CREDITS = 1000;
 const CREDITS_STORAGE_KEY = "darkroomx_credits";
 const PROFILE_STORAGE_KEY = "darkroomx_profile";
 const AUTH_TOKEN_STORAGE_KEY = "darkroomx_auth_token";
+const REFRESH_TOKEN_STORAGE_KEY = "darkroomx_refresh_token";
+const AUTH_EXPIRES_AT_STORAGE_KEY = "darkroomx_auth_expires_at";
 const PROJECT_META_STORAGE_KEY = "darkroomx_active_project";
 const CREDIT_COSTS = {
   generate: 1,
@@ -519,23 +521,120 @@ const getAuthToken = () => {
   }
 };
 
-const getJsonRequestHeaders = () => {
-  const token = getAuthToken();
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+const getRefreshToken = () => {
+  try {
+    return String(window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
 };
 
-const handleExpiredAuthSession = (message = "Your session expired. Please sign in again.") => {
+const getAuthExpiresAtMs = () => {
+  try {
+    const raw = Number(window.localStorage.getItem(AUTH_EXPIRES_AT_STORAGE_KEY) || "0");
+    return Number.isFinite(raw) ? raw : 0;
+  } catch {
+    return 0;
+  }
+};
+
+let authRefreshPromise = null;
+let hasHandledExpiredAuthSession = false;
+
+const storeAuthSession = ({ accessToken = "", refreshToken = "", expiresIn = 0 } = {}) => {
+  if (!accessToken) return;
+  try {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, accessToken);
+    if (refreshToken) {
+      window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+    }
+    const expiresMs = Number(expiresIn);
+    if (Number.isFinite(expiresMs) && expiresMs > 0) {
+      window.localStorage.setItem(AUTH_EXPIRES_AT_STORAGE_KEY, String(Date.now() + expiresMs * 1000));
+    }
+  } catch {
+    // Ignore storage issues.
+  }
+  hasHandledExpiredAuthSession = false;
+};
+
+const clearAuthSession = () => {
   try {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_EXPIRES_AT_STORAGE_KEY);
     window.localStorage.removeItem(PROFILE_STORAGE_KEY);
   } catch {
     // Ignore storage issues.
   }
+};
+
+const refreshAuthSession = async (force = false) => {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return "";
+  if (authRefreshPromise) return authRefreshPromise;
+
+  const token = getAuthToken();
+  const expiresAtMs = getAuthExpiresAtMs();
+  const shouldRefresh = force || !token || !expiresAtMs || Date.now() > expiresAtMs - 60 * 1000;
+  if (!shouldRefresh) return token;
+
+  authRefreshPromise = fetch("/api/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+  })
+    .then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return "";
+      const nextAccessToken = String(payload?.accessToken || "").trim();
+      const nextRefreshToken = String(payload?.refreshToken || "").trim();
+      const expiresIn = Number(payload?.expiresIn || 0);
+      if (!nextAccessToken) return "";
+      storeAuthSession({ accessToken: nextAccessToken, refreshToken: nextRefreshToken, expiresIn });
+      return nextAccessToken;
+    })
+    .catch(() => "")
+    .finally(() => {
+      authRefreshPromise = null;
+    });
+
+  return authRefreshPromise;
+};
+
+const getJsonRequestHeaders = () => {
+  return {
+    "Content-Type": "application/json",
+  };
+};
+
+const handleExpiredAuthSession = (message = "Your session expired. Please sign in again.") => {
+  if (hasHandledExpiredAuthSession) return;
+  hasHandledExpiredAuthSession = true;
+  clearAuthSession();
   window.alert(message);
   window.location.href = "/signup";
+};
+
+const authFetch = async (url, options = {}) => {
+  let token = await refreshAuthSession(false);
+  if (!token) token = getAuthToken();
+
+  const buildOptions = (authToken) => {
+    const headers = {
+      ...(options.headers || {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    };
+    return { ...options, headers };
+  };
+
+  let response = await fetch(url, buildOptions(token));
+  if (response.status !== 401) return response;
+
+  const refreshedToken = await refreshAuthSession(true);
+  if (!refreshedToken) return response;
+  response = await fetch(url, buildOptions(refreshedToken));
+  return response;
 };
 
 const setTrialLockVisible = (visible, message = "") => {
@@ -570,13 +669,12 @@ const syncCreditsFromServer = (creditsBalance) => {
 };
 
 const beginStripeCheckout = async (kind) => {
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken() && !getRefreshToken()) {
     window.location.href = "/signup";
     return;
   }
   const endpoint = kind === "subscription" ? "/api/stripe/checkout/subscription" : "/api/stripe/checkout/topup";
-  const response = await fetch(endpoint, {
+  const response = await authFetch(endpoint, {
     method: "POST",
     headers: getJsonRequestHeaders(),
     body: "{}",
@@ -602,12 +700,11 @@ const beginStripeCheckout = async (kind) => {
 };
 
 const beginStripeBillingPortal = async () => {
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken() && !getRefreshToken()) {
     window.location.href = "/signup";
     return;
   }
-  const response = await fetch("/api/stripe/billing-portal", {
+  const response = await authFetch("/api/stripe/billing-portal", {
     method: "POST",
     headers: getJsonRequestHeaders(),
     body: "{}",
@@ -628,17 +725,13 @@ const beginStripeBillingPortal = async () => {
 };
 
 const fetchAccessStatus = async () => {
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken() && !getRefreshToken()) {
     setTrialLockVisible(true, "Please sign in to continue using DarkroomX.");
     return null;
   }
 
-  const response = await fetch("/api/access/status", {
+  const response = await authFetch("/api/access/status", {
     method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -2457,16 +2550,13 @@ const renderSettingsProjects = (projects = []) => {
       openBtn.disabled = true;
       try {
         const token = getAuthToken();
-        if (!token) {
+        if (!token && !getRefreshToken()) {
           window.location.href = "/signup";
           return;
         }
         setSettingsProjectsStatus(`Opening ${project.name || "project"}...`);
-        const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/session`, {
+        const response = await authFetch(`/api/projects/${encodeURIComponent(project.id)}/session`, {
           method: "GET",
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -2508,18 +2598,12 @@ const renderSettingsProjects = (projects = []) => {
 };
 
 const refreshProjectsFromCloud = async () => {
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken() && !getRefreshToken()) {
     renderSettingsProjects([]);
     setSettingsProjectsStatus("Sign in to manage projects.");
     return;
   }
-  const response = await fetch("/api/projects", {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const response = await authFetch("/api/projects", { method: "GET" });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401) {
@@ -2540,14 +2624,13 @@ const ensureProjectForSave = async () => {
   if (state.currentProjectId) {
     return { id: state.currentProjectId, name: state.currentProjectName || sanitizeProjectName(settingsProjectNameInput?.value || "") };
   }
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken() && !getRefreshToken()) {
     window.location.href = "/signup";
     return null;
   }
   const fallbackName = `Session ${new Date().toISOString().slice(0, 10)}`;
   const name = sanitizeProjectName(settingsProjectNameInput?.value || fallbackName) || fallbackName;
-  const response = await fetch("/api/projects", {
+  const response = await authFetch("/api/projects", {
     method: "POST",
     headers: getJsonRequestHeaders(),
     body: JSON.stringify({ name }),
@@ -2570,7 +2653,7 @@ const saveCurrentSessionToCloudProject = async () => {
   if (!ensured?.id) return;
   const payload = await getSerializedProjectPayload();
   const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
-  const response = await fetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
+  const response = await authFetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
     method: "PUT",
     headers: getJsonRequestHeaders(),
     body: JSON.stringify({
@@ -2594,7 +2677,7 @@ const saveCurrentSessionToCloudProject = async () => {
 const createFreshCloudProject = async () => {
   const fallbackName = `Session ${new Date().toISOString().slice(0, 10)}`;
   const name = sanitizeProjectName(settingsProjectNameInput?.value || fallbackName) || fallbackName;
-  const response = await fetch("/api/projects", {
+  const response = await authFetch("/api/projects", {
     method: "POST",
     headers: getJsonRequestHeaders(),
     body: JSON.stringify({ name }),
@@ -2718,7 +2801,7 @@ const submitGenerateRequest = async () => {
     closeGenerateModal();
     editProcessingStatus.textContent = "Generating image...";
 
-    const response = await fetch("/api/image-generate", {
+    const response = await authFetch("/api/image-generate", {
       method: "POST",
       headers: getJsonRequestHeaders(),
       body: JSON.stringify({ prompt, resolution, aspectRatio }),
@@ -2794,7 +2877,7 @@ const submitEditRequest = async () => {
 
       try {
         const imageDataUrl = await fileToDataUrl(photo.file);
-        const response = await fetch("/api/image-edit", {
+        const response = await authFetch("/api/image-edit", {
           method: "POST",
           headers: getJsonRequestHeaders(),
           body: JSON.stringify({ prompt, imageDataUrl }),
@@ -2851,7 +2934,7 @@ const submitEditRequest = async () => {
           const imageDataUrl = await fileToDataUrl(photo.file);
           photo.aiJob = { status: "processing", label: `Retry ${i + 1}/${failedTargets.length}` };
           renderFilmstrip();
-          const response = await fetch("/api/image-edit", {
+          const response = await authFetch("/api/image-edit", {
             method: "POST",
             headers: getJsonRequestHeaders(),
             body: JSON.stringify({ prompt, imageDataUrl }),
