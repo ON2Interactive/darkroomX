@@ -592,7 +592,7 @@ body {
   background-size: 24px 24px;
   background-position: 0 0, 0 0;
   min-height: 800px;
-  padding: 100px 20px;
+  padding: 100px 20px 200px;
 }
 
 .landing-app-ui-inner {
@@ -663,7 +663,7 @@ body {
 .landing-features {
   background: linear-gradient(180deg, #0d0d0d 0%, #070707 100%);
   min-height: 800px;
-  padding: 100px 20px;
+  padding: 100px 20px 200px;
 }
 
 .landing-features-inner {
@@ -768,7 +768,7 @@ body {
   background-size: 24px 24px;
   background-position: 0 0, 0 0;
   min-height: 800px;
-  padding: 100px 20px;
+  padding: 100px 20px 200px;
 }
 
 .landing-users-inner {
@@ -1171,7 +1171,7 @@ body {
   }
 
   .landing-app-ui {
-    padding: 34px 14px 56px;
+    padding: 34px 14px 112px;
   }
 
   .landing-app-ui-copy {
@@ -1184,7 +1184,7 @@ body {
   }
 
   .landing-features {
-    padding: 34px 14px 56px;
+    padding: 34px 14px 112px;
   }
 
   .landing-features-copy {
@@ -1216,7 +1216,7 @@ body {
   }
 
   .landing-users {
-    padding: 34px 14px 56px;
+    padding: 34px 14px 112px;
   }
 
   .landing-users-copy {
@@ -1306,6 +1306,18 @@ body {
 }
 
 @media (min-width: 781px) and (max-width: 1120px) {
+  .landing-app-ui {
+    padding-bottom: 172px;
+  }
+
+  .landing-features {
+    padding-bottom: 172px;
+  }
+
+  .landing-users {
+    padding-bottom: 172px;
+  }
+
   .landing-features-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
