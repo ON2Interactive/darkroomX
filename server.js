@@ -172,6 +172,12 @@ function getStripeConfig(req) {
   };
 }
 
+function getTrialWindowMs() {
+  const hoursRaw = Number(process.env.TRIAL_HOURS || "24");
+  const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, Math.floor(hoursRaw))) : 24;
+  return hours * 60 * 60 * 1000;
+}
+
 function isSubscriptionActiveStatus(status) {
   return status === "active" || status === "trialing";
 }
@@ -349,6 +355,67 @@ async function ensureUserHasActiveSubscription(req, user) {
 
   setCachedSubscriptionAccess(userId, subscriptionState.active, customerId);
   return { ok: true, active: Boolean(subscriptionState.active), customerId, enforced: true };
+}
+
+async function getUserProfileCreatedAt(req, userId) {
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return { ok: false, status: 500, error: service.error };
+  }
+  const { config, headers } = service;
+  const response = await fetch(
+    `${config.url}/rest/v1/profiles?select=id,created_at&id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {
+      method: "GET",
+      headers,
+    },
+  );
+  if (!response.ok) {
+    const reason = await response.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to read profile for trial status.${reason ? ` ${reason}` : ""}` };
+  }
+  const rows = await response.json().catch(() => []);
+  const profile = Array.isArray(rows) ? rows[0] : null;
+  if (!profile) {
+    return { ok: false, status: 404, error: "Profile not found." };
+  }
+  const createdAt = String(profile?.created_at || "");
+  const createdAtMs = Date.parse(createdAt);
+  if (!Number.isFinite(createdAtMs)) {
+    return { ok: false, status: 500, error: "Profile created_at is invalid." };
+  }
+  return { ok: true, createdAt, createdAtMs };
+}
+
+async function getUserAccessStatus(req, user) {
+  const userId = String(user?.id || "").trim();
+  if (!userId) {
+    return { ok: false, status: 401, error: "Unauthorized." };
+  }
+
+  const subscriptionAccess = await ensureUserHasActiveSubscription(req, user);
+  if (!subscriptionAccess.ok) return subscriptionAccess;
+
+  const created = await getUserProfileCreatedAt(req, userId);
+  if (!created.ok) return created;
+
+  const trialWindowMs = getTrialWindowMs();
+  const trialEndsAtMs = created.createdAtMs + trialWindowMs;
+  const nowMs = Date.now();
+  const trialActive = nowMs < trialEndsAtMs;
+  const subscriptionActive = Boolean(subscriptionAccess.active);
+  const accessAllowed = subscriptionActive || trialActive;
+
+  return {
+    ok: true,
+    enforced: true,
+    subscriptionActive,
+    trialActive,
+    accessAllowed,
+    trialStartsAt: new Date(created.createdAtMs).toISOString(),
+    trialEndsAt: new Date(trialEndsAtMs).toISOString(),
+    now: new Date(nowMs).toISOString(),
+  };
 }
 
 function createSupabaseRequestHeaders({ apiKey, bearerToken, prefer } = {}) {
@@ -1367,8 +1434,8 @@ function handleSupabaseAuthBootstrap(req, res) {
       }
 
       let redirectTo = "/pricing";
-      const subscriptionAccess = await ensureUserHasActiveSubscription(req, supabaseUserResult.user);
-      if (subscriptionAccess.ok && subscriptionAccess.active) {
+      const accessStatus = await getUserAccessStatus(req, supabaseUserResult.user);
+      if (accessStatus.ok && accessStatus.accessAllowed) {
         redirectTo = "/studio";
       }
 
@@ -1377,10 +1444,41 @@ function handleSupabaseAuthBootstrap(req, res) {
         redirectTo,
         profile: bootstrapResult.profile,
         activeProject: bootstrapResult.activeProject,
+        access: accessStatus.ok
+          ? {
+              subscriptionActive: accessStatus.subscriptionActive,
+              trialActive: accessStatus.trialActive,
+              accessAllowed: accessStatus.accessAllowed,
+              trialEndsAt: accessStatus.trialEndsAt,
+            }
+          : null,
       });
     } catch (error) {
       return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
     }
+  });
+}
+
+async function handleAccessStatus(req, res) {
+  const authResult = await getAuthenticatedSupabaseUser(req);
+  if (!authResult.ok) {
+    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+  }
+
+  const accessStatus = await getUserAccessStatus(req, authResult.user);
+  if (!accessStatus.ok) {
+    return sendJson(res, accessStatus.status || 500, { error: accessStatus.error || "Unable to resolve access status." });
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    enforced: accessStatus.enforced,
+    subscriptionActive: accessStatus.subscriptionActive,
+    trialActive: accessStatus.trialActive,
+    accessAllowed: accessStatus.accessAllowed,
+    trialStartsAt: accessStatus.trialStartsAt,
+    trialEndsAt: accessStatus.trialEndsAt,
+    now: accessStatus.now,
   });
 }
 
@@ -1711,12 +1809,12 @@ async function handleNanoBananaEdit(req, res) {
       if (!userId) {
         return sendJson(res, 401, { error: "Unauthorized." });
       }
-      const subscriptionAccess = await ensureUserHasActiveSubscription(req, authResult.user);
-      if (!subscriptionAccess.ok) {
-        return sendJson(res, subscriptionAccess.status || 502, { error: subscriptionAccess.error || "Unable to verify subscription." });
+      const accessStatus = await getUserAccessStatus(req, authResult.user);
+      if (!accessStatus.ok) {
+        return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
       }
-      if (!subscriptionAccess.active) {
-        return sendJson(res, 403, { error: "Active subscription required to use AI tools." });
+      if (!accessStatus.accessAllowed) {
+        return sendJson(res, 403, { error: "Your trial has ended. Subscribe to continue using AI tools." });
       }
 
       const cost = 1;
@@ -1928,12 +2026,12 @@ async function handleNanoBananaGenerate(req, res) {
       if (!userId) {
         return sendJson(res, 401, { error: "Unauthorized." });
       }
-      const subscriptionAccess = await ensureUserHasActiveSubscription(req, authResult.user);
-      if (!subscriptionAccess.ok) {
-        return sendJson(res, subscriptionAccess.status || 502, { error: subscriptionAccess.error || "Unable to verify subscription." });
+      const accessStatus = await getUserAccessStatus(req, authResult.user);
+      if (!accessStatus.ok) {
+        return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
       }
-      if (!subscriptionAccess.active) {
-        return sendJson(res, 403, { error: "Active subscription required to use AI tools." });
+      if (!accessStatus.accessAllowed) {
+        return sendJson(res, 403, { error: "Your trial has ended. Subscribe to continue using AI tools." });
       }
 
       const cost = 1;
@@ -2344,6 +2442,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/auth/bootstrap") {
     handleSupabaseAuthBootstrap(req, res);
+    return;
+  }
+  if (req.method === "GET" && pathname === "/api/access/status") {
+    handleAccessStatus(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/contact") {

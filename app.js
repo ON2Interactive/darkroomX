@@ -91,6 +91,10 @@ const creditsModal = document.getElementById("creditsModal");
 const creditsModalTitle = document.getElementById("creditsModalTitle");
 const creditsModalCloseBtn = document.getElementById("creditsModalCloseBtn");
 const creditsModalBuyBtn = document.getElementById("creditsModalBuyBtn");
+const trialLockModal = document.getElementById("trialLockModal");
+const trialLockMessage = document.getElementById("trialLockMessage");
+const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
+const trialLockRefreshBtn = document.getElementById("trialLockRefreshBtn");
 const printOfferingSelect = document.getElementById("printOfferingSelect");
 const printQuantityInput = document.getElementById("printQuantityInput");
 const printCurrencyInput = document.getElementById("printCurrencyInput");
@@ -252,6 +256,8 @@ const state = {
   isPanningWorkspace: false,
   hasShownExportFallbackHint: false,
   credits: DEFAULT_CREDITS,
+  accessCheckTimer: null,
+  trialLocked: false,
 };
 
 const hydrateIcons = () => {
@@ -513,6 +519,15 @@ const handleExpiredAuthSession = (message = "Your session expired. Please sign i
   window.location.href = "/signup";
 };
 
+const setTrialLockVisible = (visible, message = "") => {
+  state.trialLocked = Boolean(visible);
+  if (!trialLockModal) return;
+  trialLockModal.classList.toggle("hidden-panel", !visible);
+  if (visible && trialLockMessage && message) {
+    trialLockMessage.textContent = message;
+  }
+};
+
 const syncCreditsFromServer = (creditsBalance) => {
   const next = Number(creditsBalance);
   if (!Number.isFinite(next) || next < 0) return;
@@ -565,6 +580,61 @@ const beginStripeCheckout = async (kind) => {
     throw new Error("Missing checkout URL.");
   }
   window.location.href = checkoutUrl;
+};
+
+const fetchAccessStatus = async () => {
+  const token = getAuthToken();
+  if (!token) {
+    setTrialLockVisible(true, "Please sign in to continue using DarkroomX.");
+    return null;
+  }
+
+  const response = await fetch("/api/access/status", {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return null;
+    }
+    throw new Error(payload?.error || "Unable to verify account access.");
+  }
+  return payload;
+};
+
+const applyAccessStatus = (status) => {
+  if (!status || typeof status !== "object") return;
+  const accessAllowed = Boolean(status.accessAllowed);
+  if (accessAllowed) {
+    setTrialLockVisible(false);
+    return;
+  }
+  setTrialLockVisible(true, "Your 24-hour free trial has ended. Subscribe to keep editing and generating images.");
+};
+
+const startAccessStatusPolling = async () => {
+  try {
+    const status = await fetchAccessStatus();
+    applyAccessStatus(status);
+  } catch (error) {
+    console.error("Access status check failed:", error?.message || error);
+  }
+
+  if (state.accessCheckTimer) {
+    clearInterval(state.accessCheckTimer);
+  }
+  state.accessCheckTimer = window.setInterval(async () => {
+    try {
+      const status = await fetchAccessStatus();
+      applyAccessStatus(status);
+    } catch (error) {
+      console.error("Access status poll failed:", error?.message || error);
+    }
+  }, 60 * 1000);
 };
 
 const syncCreditsUI = () => {
@@ -3793,6 +3863,32 @@ creditsModal?.addEventListener("pointerdown", (event) => {
   }
 });
 
+trialLockSubscribeBtn?.addEventListener("click", async () => {
+  trialLockSubscribeBtn.disabled = true;
+  try {
+    await beginStripeCheckout("subscription");
+  } catch (error) {
+    window.alert(error?.message || "Unable to open checkout.");
+  } finally {
+    trialLockSubscribeBtn.disabled = false;
+  }
+});
+
+trialLockRefreshBtn?.addEventListener("click", async () => {
+  trialLockRefreshBtn.disabled = true;
+  try {
+    const status = await fetchAccessStatus();
+    applyAccessStatus(status);
+    if (!state.trialLocked) {
+      window.alert("Subscription active. Welcome back.");
+    }
+  } catch (error) {
+    window.alert(error?.message || "Unable to refresh subscription status.");
+  } finally {
+    trialLockRefreshBtn.disabled = false;
+  }
+});
+
 overlayLayer.addEventListener("pointerdown", (event) => {
   if (state.isSpacePressed) return;
   if (state.activeTool !== "select") return;
@@ -4107,3 +4203,4 @@ syncHistoryControls();
 syncWorkspacePanCursor();
 syncCreditsUI();
 hydrateIcons();
+startAccessStatusPolling();

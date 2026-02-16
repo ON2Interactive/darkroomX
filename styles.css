@@ -2464,6 +2464,51 @@ body {
   animation: spin 0.9s linear infinite;
 }
 
+.trial-lock-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(12px);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+
+.trial-lock-backdrop.hidden-panel {
+  display: none;
+}
+
+.trial-lock-card {
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  background: #161616;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  padding: 24px 22px;
+  display: grid;
+  gap: 14px;
+}
+
+.trial-lock-card h3 {
+  margin: 0;
+  font-size: 1.45rem;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.trial-lock-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.55;
+}
+
+.trial-lock-actions {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
