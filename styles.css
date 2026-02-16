@@ -2449,12 +2449,11 @@ body {
   right: 12px;
 }
 
-.settings-modal-content h3 {
-  margin: 0;
-  font-size: 1.9rem;
-  font-weight: 500;
-  line-height: 1.05;
-  color: rgba(255, 255, 255, 0.95);
+.settings-modal-logo {
+  width: min(260px, 70%);
+  height: auto;
+  display: block;
+  margin: 0 0 60px;
 }
 
 .settings-modal-links {
