@@ -161,6 +161,7 @@ function getStripeConfig(req) {
   const baseUrl = getPublicBaseUrl(req);
   const successUrl = normalizeEnvValue(process.env.STRIPE_SUCCESS_URL || `${baseUrl}/pricing?success=1`);
   const cancelUrl = normalizeEnvValue(process.env.STRIPE_CANCEL_URL || `${baseUrl}/pricing?canceled=1`);
+  const billingPortalReturnUrl = normalizeEnvValue(process.env.STRIPE_BILLING_PORTAL_RETURN_URL || `${baseUrl}/editor`);
   return {
     secretKey,
     publishableKey,
@@ -169,6 +170,7 @@ function getStripeConfig(req) {
     topupCredits,
     successUrl,
     cancelUrl,
+    billingPortalReturnUrl,
   };
 }
 
@@ -1301,6 +1303,40 @@ async function handleStripeTopupCheckout(req, res) {
     ok: true,
     checkoutUrl: String(sessionResponse.payload?.url || ""),
     sessionId: String(sessionResponse.payload?.id || ""),
+  });
+}
+
+async function handleStripeBillingPortal(req, res) {
+  const authResult = await getAuthenticatedSupabaseUser(req);
+  if (!authResult.ok) {
+    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+  }
+
+  const stripeConfig = getStripeConfig(req);
+  if (!stripeConfig.secretKey) {
+    return sendJson(res, 500, { error: "Stripe billing portal is not configured." });
+  }
+
+  const customerResult = await getOrCreateStripeCustomerForUser(stripeConfig.secretKey, authResult.user);
+  if (!customerResult.ok || !customerResult.customerId) {
+    return sendJson(res, customerResult.status || 502, { error: customerResult.error || "Unable to load Stripe customer." });
+  }
+
+  const params = new URLSearchParams();
+  params.set("customer", customerResult.customerId);
+  params.set("return_url", stripeConfig.billingPortalReturnUrl);
+
+  const sessionResponse = await stripeApiRequest(stripeConfig.secretKey, "billing_portal/sessions", {
+    method: "POST",
+    params,
+  });
+  if (!sessionResponse.ok) {
+    return sendJson(res, sessionResponse.status || 502, { error: sessionResponse.error || "Unable to open billing portal." });
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    portalUrl: String(sessionResponse.payload?.url || ""),
   });
 }
 
@@ -2482,6 +2518,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/stripe/checkout/topup") {
     handleStripeTopupCheckout(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/stripe/billing-portal") {
+    handleStripeBillingPortal(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/stripe/webhook") {

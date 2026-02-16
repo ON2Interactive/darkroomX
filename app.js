@@ -61,6 +61,7 @@ const toolUploadBtn = document.getElementById("toolUploadBtn");
 const toolTextBtn = document.getElementById("toolTextBtn");
 const toolGenerateBtn = document.getElementById("toolGenerateBtn");
 const toolPrintBtn = document.getElementById("toolPrintBtn");
+const toolSettingsBtn = document.getElementById("toolSettingsBtn");
 const toolShapesBtn = document.getElementById("toolShapesBtn");
 const toolEditBtn = document.getElementById("toolEditBtn");
 
@@ -91,6 +92,11 @@ const creditsModal = document.getElementById("creditsModal");
 const creditsModalTitle = document.getElementById("creditsModalTitle");
 const creditsModalCloseBtn = document.getElementById("creditsModalCloseBtn");
 const creditsModalBuyBtn = document.getElementById("creditsModalBuyBtn");
+const settingsModal = document.getElementById("settingsModal");
+const settingsModalCloseBtn = document.getElementById("settingsModalCloseBtn");
+const settingsManageSubscriptionBtn = document.getElementById("settingsManageSubscriptionBtn");
+const settingsSubscribeBtn = document.getElementById("settingsSubscribeBtn");
+const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -580,6 +586,32 @@ const beginStripeCheckout = async (kind) => {
     throw new Error("Missing checkout URL.");
   }
   window.location.href = checkoutUrl;
+};
+
+const beginStripeBillingPortal = async () => {
+  const token = getAuthToken();
+  if (!token) {
+    window.location.href = "/signup";
+    return;
+  }
+  const response = await fetch("/api/stripe/billing-portal", {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: "{}",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(payload?.error || "Unable to open billing portal.");
+  }
+  const portalUrl = String(payload?.portalUrl || "");
+  if (!portalUrl) {
+    throw new Error("Missing billing portal URL.");
+  }
+  window.location.href = portalUrl;
 };
 
 const fetchAccessStatus = async () => {
@@ -2075,6 +2107,17 @@ const openCreditsModal = ({ depleted = false, context = "status" } = {}) => {
 const closeCreditsModal = () => {
   if (!creditsModal) return;
   creditsModal.classList.add("hidden-panel");
+};
+
+const openSettingsModal = () => {
+  if (!settingsModal) return;
+  settingsModal.classList.remove("hidden-panel");
+  hydrateIcons();
+};
+
+const closeSettingsModal = () => {
+  if (!settingsModal) return;
+  settingsModal.classList.add("hidden-panel");
 };
 
 const submitPeechoPrintOrder = async () => {
@@ -3789,6 +3832,9 @@ document.addEventListener("pointerdown", (event) => {
 toolPrintBtn.addEventListener("click", () => {
   window.print();
 });
+toolSettingsBtn?.addEventListener("click", () => {
+  openSettingsModal();
+});
 orderPrintBtn.addEventListener("click", () => {
   if (!getSelectedPhoto()) return;
   openPrintModal();
@@ -3860,6 +3906,43 @@ creditsModalBuyBtn?.addEventListener("click", async () => {
 creditsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === creditsModal) {
     closeCreditsModal();
+  }
+});
+
+settingsModalCloseBtn?.addEventListener("click", closeSettingsModal);
+settingsManageSubscriptionBtn?.addEventListener("click", async () => {
+  settingsManageSubscriptionBtn.disabled = true;
+  try {
+    await beginStripeBillingPortal();
+  } catch (error) {
+    window.alert(error?.message || "Unable to open billing portal.");
+  } finally {
+    settingsManageSubscriptionBtn.disabled = false;
+  }
+});
+settingsSubscribeBtn?.addEventListener("click", async () => {
+  settingsSubscribeBtn.disabled = true;
+  try {
+    await beginStripeCheckout("subscription");
+  } catch (error) {
+    window.alert(error?.message || "Unable to open checkout.");
+  } finally {
+    settingsSubscribeBtn.disabled = false;
+  }
+});
+settingsBuyCreditsBtn?.addEventListener("click", async () => {
+  settingsBuyCreditsBtn.disabled = true;
+  try {
+    await beginStripeCheckout("topup");
+  } catch (error) {
+    window.alert(error?.message || "Unable to open checkout.");
+  } finally {
+    settingsBuyCreditsBtn.disabled = false;
+  }
+});
+settingsModal?.addEventListener("pointerdown", (event) => {
+  if (event.target === settingsModal) {
+    closeSettingsModal();
   }
 });
 

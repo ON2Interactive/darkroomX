@@ -86,6 +86,9 @@
           <button id="toolGenerateBtn" type="button" class="tool-btn" aria-label="Generate Image" title="Generate Image">
             <i data-lucide="wand-sparkles"></i>
           </button>
+          <button id="toolPrintBtn" type="button" class="tool-btn" aria-label="Print" title="Print">
+            <i data-lucide="printer"></i>
+          </button>
           <div id="shapeFlyout" class="shape-flyout hidden-panel" aria-label="Shape Types">
             <button type="button" class="shape-option-btn" data-shape-type="rectangle" title="Rectangle">
               <i data-lucide="square"></i>
@@ -106,8 +109,8 @@
               <i data-lucide="hexagon"></i>
             </button>
           </div>
-          <button id="toolPrintBtn" type="button" class="tool-btn tool-btn--bottom" aria-label="Print" title="Print">
-            <i data-lucide="printer"></i>
+          <button id="toolSettingsBtn" type="button" class="tool-btn tool-btn--bottom" aria-label="Settings" title="Settings">
+            <i data-lucide="settings"></i>
           </button>
         </aside>
 
@@ -542,6 +545,22 @@
         <div class="modal-body credits-modal-body"></div>
         <div class="modal-footer">
           <button id="creditsModalBuyBtn" class="modal-text-btn modal-text-btn-primary" type="button">Buy Credits</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsModal" class="modal-backdrop hidden-panel" role="dialog" aria-modal="true" aria-label="Account Settings">
+      <div class="modal-card settings-modal-card">
+        <div class="modal-header">
+          <h3>Account Settings</h3>
+          <button id="settingsModalCloseBtn" class="icon-btn" type="button" aria-label="Close Settings Modal">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-body settings-modal-body">
+          <button id="settingsManageSubscriptionBtn" class="modal-text-btn" type="button">Manage Subscription</button>
+          <button id="settingsSubscribeBtn" class="modal-text-btn" type="button">Subscribe</button>
+          <button id="settingsBuyCreditsBtn" class="modal-text-btn modal-text-btn-primary" type="button">Buy Credits</button>
         </div>
       </div>
     </div>

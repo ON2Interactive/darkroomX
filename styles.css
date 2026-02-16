@@ -2389,6 +2389,20 @@ body {
   min-height: 400px;
 }
 
+.settings-modal-card {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.settings-modal-body {
+  padding: 14px 12px 18px;
+  grid-template-columns: 1fr;
+  align-content: start;
+}
+
+.settings-modal-body .modal-text-btn {
+  width: 100%;
+}
+
 .credits-modal-body {
   min-height: 0;
   padding: 0;
