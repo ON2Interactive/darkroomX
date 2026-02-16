@@ -2439,6 +2439,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
   padding: 40px 54px;
   gap: 24px;
 }
@@ -2447,6 +2448,14 @@ body {
   position: absolute;
   top: 12px;
   right: 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.settings-modal-close:hover {
+  color: rgba(255, 255, 255, 0.62);
 }
 
 .settings-modal-logo {
@@ -2459,7 +2468,7 @@ body {
 .settings-modal-links {
   display: grid;
   gap: 14px;
-  justify-items: start;
+  justify-items: center;
 }
 
 .settings-modal-link {
@@ -2471,7 +2480,7 @@ body {
   font-size: 1.08rem;
   line-height: 1.2;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
 }
 
 .settings-modal-link:hover {
