@@ -182,49 +182,41 @@
         <div class="landing-pricing-inner">
           <div class="landing-pricing-copy">
             <h1>Pricing</h1>
-            <p>No subscriptions. No expiring credits. Pay once, use anytime.</p>
+            <p>One simple plan. Full access. Top up credits only when you need more AI generations.</p>
           </div>
 
-          <div class="landing-pricing-grid">
-            <article class="landing-pricing-card is-starter">
-              <h3>Basic</h3>
-              <div class="landing-pricing-price">$10</div>
-              <div class="landing-pricing-credits">600 credits</div>
+          <div class="landing-pricing-layout">
+            <article class="landing-pricing-card landing-pricing-single-card is-featured">
+              <h3>DarkroomX Pro</h3>
+              <div class="landing-pricing-price">$14.99<span>/month</span></div>
+              <div class="landing-pricing-credits">Credits top-up: $25 for 100 credits</div>
               <ul>
-                <li>Image Generation - 10 credits</li>
-                <li>Image Edits - 10 credits</li>
-                <li>Export - 10 credits</li>
+                <li>1 credit = 1 AI generation (4K)</li>
+                <li>AI image edits use credits</li>
+                <li>Exports are included</li>
+                <li>Manual edits are free</li>
               </ul>
-              <p class="landing-pricing-note">Best for testing ideas, moodboards, and quick client previews.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
+              <p class="landing-pricing-note">Start with a free trial, then subscribe to keep full access. Top up credits as needed.</p>
+              <div class="landing-pricing-actions">
+                <a href="/signup" class="landing-pricing-btn">Start Free Trial</a>
+                <a href="/pricing" class="landing-pricing-btn">Buy 100 Credits</a>
+              </div>
             </article>
 
-            <article class="landing-pricing-card is-featured">
-              <span class="landing-pricing-badge">Most Popular</span>
-              <h3>Enthusiast</h3>
-              <div class="landing-pricing-price">$25</div>
-              <div class="landing-pricing-credits">1,800 credits</div>
-              <ul>
-                <li>Image Generation - 10 credits</li>
-                <li>Image Edits - 10 credits</li>
-                <li>Export - 10 credits</li>
-              </ul>
-              <p class="landing-pricing-note">Ideal for photographers and studios running multiple projects.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
-            </article>
-
-            <article class="landing-pricing-card is-brand">
-              <h3>Pro</h3>
-              <div class="landing-pricing-price">$50</div>
-              <div class="landing-pricing-credits">4,000 credits</div>
-              <ul>
-                <li>Image Generation - 10 credits</li>
-                <li>Image Edits - 10 credits</li>
-                <li>Export - 10 credits</li>
-              </ul>
-              <p class="landing-pricing-note">Built for higher-volume brand and editorial workflows.</p>
-              <a href="/signup" class="landing-pricing-btn">Get Started</a>
-            </article>
+            <aside class="pricing-slideshow" aria-label="DarkroomX gallery preview">
+              <div class="pricing-slideshow-track" id="landingPricingSlideshowTrack">
+                <img class="pricing-slide is-active" src="/Slideshow%20Images/02.jpeg" alt="DarkroomX example image 02" loading="eager" decoding="async" />
+                <img class="pricing-slide" src="/Slideshow%20Images/07.jpeg" alt="DarkroomX example image 07" loading="lazy" decoding="async" />
+                <img class="pricing-slide" src="/Slideshow%20Images/08.jpeg" alt="DarkroomX example image 08" loading="lazy" decoding="async" />
+                <img class="pricing-slide" src="/Slideshow%20Images/09.jpeg" alt="DarkroomX example image 09" loading="lazy" decoding="async" />
+              </div>
+              <div class="pricing-slideshow-dots" id="landingPricingSlideshowDots" aria-hidden="true">
+                <span class="is-active"></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </aside>
           </div>
         </div>
       </section>
@@ -307,6 +299,34 @@
         if (footerYear) {
           footerYear.textContent = String(new Date().getFullYear());
         }
+
+        const slideshowTrack = document.getElementById("landingPricingSlideshowTrack");
+        const slideEls = slideshowTrack ? Array.from(slideshowTrack.querySelectorAll(".pricing-slide")) : [];
+        const dotWrap = document.getElementById("landingPricingSlideshowDots");
+        const dotEls = dotWrap ? Array.from(dotWrap.querySelectorAll("span")) : [];
+        let activeSlide = 0;
+        let slideTimer = null;
+
+        const setActiveSlide = (index) => {
+          if (!slideEls.length) return;
+          activeSlide = (index + slideEls.length) % slideEls.length;
+          slideEls.forEach((slide, i) => {
+            slide.classList.toggle("is-active", i === activeSlide);
+          });
+          dotEls.forEach((dot, i) => {
+            dot.classList.toggle("is-active", i === activeSlide);
+          });
+        };
+
+        const startSlideShow = () => {
+          if (slideEls.length <= 1) return;
+          if (slideTimer) window.clearInterval(slideTimer);
+          slideTimer = window.setInterval(() => {
+            setActiveSlide(activeSlide + 1);
+          }, 4200);
+        };
+
+        startSlideShow();
       })();
     </script>
   </body>
