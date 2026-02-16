@@ -1813,8 +1813,8 @@ async function handleNanoBananaEdit(req, res) {
       if (!accessStatus.ok) {
         return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
       }
-      if (!accessStatus.accessAllowed) {
-        return sendJson(res, 403, { error: "Your trial has ended. Subscribe to continue using AI tools." });
+      if (!accessStatus.subscriptionActive) {
+        return sendJson(res, 403, { error: "AI tools require an active subscription. Trial access includes manual editing only." });
       }
 
       const cost = 1;
@@ -2030,8 +2030,8 @@ async function handleNanoBananaGenerate(req, res) {
       if (!accessStatus.ok) {
         return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
       }
-      if (!accessStatus.accessAllowed) {
-        return sendJson(res, 403, { error: "Your trial has ended. Subscribe to continue using AI tools." });
+      if (!accessStatus.subscriptionActive) {
+        return sendJson(res, 403, { error: "AI tools require an active subscription. Trial access includes manual editing only." });
       }
 
       const cost = 1;
