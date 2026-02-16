@@ -502,6 +502,17 @@ const getJsonRequestHeaders = () => {
   };
 };
 
+const handleExpiredAuthSession = (message = "Your session expired. Please sign in again.") => {
+  try {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    // Ignore storage issues.
+  }
+  window.alert(message);
+  window.location.href = "/signup";
+};
+
 const syncCreditsFromServer = (creditsBalance) => {
   const next = Number(creditsBalance);
   if (!Number.isFinite(next) || next < 0) return;
@@ -538,6 +549,10 @@ const beginStripeCheckout = async (kind) => {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
     if (response.status === 403) {
       window.alert(payload?.error || "Active subscription required before buying credits.");
       window.location.href = "/pricing";
@@ -2311,6 +2326,10 @@ const submitGenerateRequest = async () => {
 
     const payload = await response.json();
     if (!response.ok) {
+      if (response.status === 401) {
+        handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+        return;
+      }
       if (payload && Number.isFinite(Number(payload.creditsBalance))) {
         syncCreditsFromServer(payload.creditsBalance);
       }
@@ -2383,6 +2402,10 @@ const submitEditRequest = async () => {
 
         const payload = await response.json();
         if (!response.ok) {
+          if (response.status === 401) {
+            handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+            return;
+          }
           if (payload && Number.isFinite(Number(payload.creditsBalance))) {
             syncCreditsFromServer(payload.creditsBalance);
           }
@@ -2436,6 +2459,10 @@ const submitEditRequest = async () => {
 
           const payload = await response.json();
           if (!response.ok) {
+            if (response.status === 401) {
+              handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+              return;
+            }
             if (payload && Number.isFinite(Number(payload.creditsBalance))) {
               syncCreditsFromServer(payload.creditsBalance);
             }
