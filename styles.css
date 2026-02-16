@@ -2404,11 +2404,20 @@ body {
 }
 
 .settings-modal-card {
-  width: min(980px, calc(100vw - 32px));
-  min-height: 560px;
-  max-height: calc(100vh - 44px);
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: #0f0f0f;
   grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
   grid-template-rows: 1fr;
+}
+
+.settings-modal-backdrop {
+  padding: 0;
+  background: rgba(8, 8, 8, 0.92);
+  backdrop-filter: blur(0);
 }
 
 .settings-modal-media {
@@ -2430,7 +2439,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 34px 40px;
+  padding: 40px 54px;
   gap: 24px;
 }
 
@@ -2629,7 +2638,7 @@ body {
   .settings-modal-card {
     min-height: 0;
     grid-template-columns: 1fr;
-    grid-template-rows: 220px 1fr;
+    grid-template-rows: 300px 1fr;
   }
 
   .settings-modal-media {
@@ -2638,7 +2647,7 @@ body {
   }
 
   .settings-modal-content {
-    padding: 28px 24px;
+    padding: 28px 24px 34px;
   }
 
   :root {
