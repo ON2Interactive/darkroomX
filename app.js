@@ -98,6 +98,13 @@ const settingsManageSubscriptionBtn = document.getElementById("settingsManageSub
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
 const settingsProjectsBtn = document.getElementById("settingsProjectsBtn");
 const settingsShareBtn = document.getElementById("settingsShareBtn");
+const settingsProjectsPanel = document.getElementById("settingsProjectsPanel");
+const settingsProjectNameInput = document.getElementById("settingsProjectNameInput");
+const settingsProjectNewBtn = document.getElementById("settingsProjectNewBtn");
+const settingsProjectSaveBtn = document.getElementById("settingsProjectSaveBtn");
+const settingsProjectRefreshBtn = document.getElementById("settingsProjectRefreshBtn");
+const settingsProjectsStatus = document.getElementById("settingsProjectsStatus");
+const settingsProjectsList = document.getElementById("settingsProjectsList");
 const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn, settingsProjectsBtn].filter(Boolean);
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
@@ -188,6 +195,7 @@ const DEFAULT_CREDITS = 1000;
 const CREDITS_STORAGE_KEY = "darkroomx_credits";
 const PROFILE_STORAGE_KEY = "darkroomx_profile";
 const AUTH_TOKEN_STORAGE_KEY = "darkroomx_auth_token";
+const PROJECT_META_STORAGE_KEY = "darkroomx_active_project";
 const CREDIT_COSTS = {
   generate: 1,
   edit: 1,
@@ -266,6 +274,9 @@ const state = {
   credits: DEFAULT_CREDITS,
   accessCheckTimer: null,
   trialLocked: false,
+  currentProjectId: null,
+  currentProjectName: "",
+  projectsLoaded: false,
 };
 
 const hydrateIcons = () => {
@@ -2114,6 +2125,7 @@ const closeCreditsModal = () => {
 const openSettingsModal = () => {
   if (!settingsModal) return;
   settingsModal.classList.remove("hidden-panel");
+  settingsProjectsPanel?.classList.add("hidden-panel");
   hydrateIcons();
   window.requestAnimationFrame(() => {
     settingsLinkButtons[0]?.focus();
@@ -2123,6 +2135,7 @@ const openSettingsModal = () => {
 const closeSettingsModal = () => {
   if (!settingsModal) return;
   settingsModal.classList.add("hidden-panel");
+  settingsProjectsPanel?.classList.add("hidden-panel");
 };
 
 const submitPeechoPrintOrder = async () => {
@@ -2242,20 +2255,73 @@ const getProjectPhotoPayload = async (photo) => {
   };
 };
 
-const saveProjectToFile = async () => {
-  if (state.photos.length === 0) {
-    window.alert("No photos to save.");
-    return;
-  }
+const sanitizeProjectName = (name) => {
+  const raw = String(name || "").trim().replace(/\s+/g, " ");
+  return raw.slice(0, 120);
+};
 
+const loadStoredProjectMeta = () => {
+  try {
+    const raw = window.localStorage.getItem(PROJECT_META_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const projectId = String(parsed?.id || "").trim();
+    const projectName = sanitizeProjectName(parsed?.name || "");
+    if (projectId) {
+      state.currentProjectId = projectId;
+      state.currentProjectName = projectName;
+      if (settingsProjectNameInput && projectName) {
+        settingsProjectNameInput.value = projectName;
+      }
+    }
+  } catch {
+    // Ignore corrupted project meta cache.
+  }
+};
+
+const persistCurrentProjectMeta = (project) => {
+  const projectId = String(project?.id || "").trim();
+  const projectName = sanitizeProjectName(project?.name || "");
+  state.currentProjectId = projectId || null;
+  state.currentProjectName = projectName;
+  if (settingsProjectNameInput) {
+    settingsProjectNameInput.value = projectName;
+  }
+  try {
+    if (!projectId) {
+      window.localStorage.removeItem(PROJECT_META_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(
+      PROJECT_META_STORAGE_KEY,
+      JSON.stringify({
+        id: projectId,
+        name: projectName,
+      }),
+    );
+  } catch {
+    // Ignore storage issues.
+  }
+};
+
+const getSerializedProjectPayload = async () => {
   const selectedPhoto = getSelectedPhoto();
-  const payload = {
+  return {
     app: "DarkroomX",
     version: 1,
     savedAt: new Date().toISOString(),
     selectedPhotoId: selectedPhoto?.id ?? null,
     photos: await Promise.all(state.photos.filter((photo) => !photo.isPendingGenerated).map((photo) => getProjectPhotoPayload(photo))),
   };
+};
+
+const saveProjectToFile = async () => {
+  if (state.photos.length === 0) {
+    window.alert("No photos to save.");
+    return;
+  }
+
+  const payload = await getSerializedProjectPayload();
 
   const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -2268,7 +2334,6 @@ const saveProjectToFile = async () => {
 
 const restoreProjectFromPayload = async (payload) => {
   const photos = Array.isArray(payload?.photos) ? payload.photos : [];
-  if (photos.length === 0) throw new Error("Project has no photos.");
 
   disposeAllPhotos();
   state.photos = [];
@@ -2283,6 +2348,11 @@ const restoreProjectFromPayload = async (payload) => {
   setSelectedShapeIds([]);
   closeEditModal();
   closeGenerateModal();
+
+  if (photos.length === 0) {
+    clearSelectionUI();
+    return;
+  }
 
   for (const item of photos) {
     if (!item?.imageDataUrl) continue;
@@ -2337,6 +2407,218 @@ const handleProjectLoad = async (event) => {
   } finally {
     projectInput.value = "";
   }
+};
+
+const setSettingsProjectsStatus = (message = "") => {
+  if (!settingsProjectsStatus) return;
+  settingsProjectsStatus.textContent = String(message || "");
+};
+
+const formatProjectDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+const renderSettingsProjects = (projects = []) => {
+  if (!settingsProjectsList) return;
+  settingsProjectsList.innerHTML = "";
+
+  if (!Array.isArray(projects) || projects.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "settings-projects-meta";
+    empty.textContent = "No projects yet.";
+    settingsProjectsList.appendChild(empty);
+    return;
+  }
+
+  projects.forEach((project) => {
+    const item = document.createElement("article");
+    item.className = "settings-projects-item";
+
+    const head = document.createElement("div");
+    head.className = "settings-projects-item-head";
+
+    const name = document.createElement("div");
+    name.className = "settings-projects-name";
+    name.textContent = project.name || "Untitled Session";
+
+    const meta = document.createElement("div");
+    meta.className = "settings-projects-meta";
+    const stamp = formatProjectDate(project.lastOpenedAt || project.updatedAt || project.createdAt);
+    meta.textContent = stamp ? `Last opened ${stamp}` : "No save timestamp";
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "settings-projects-open";
+    openBtn.textContent = state.currentProjectId === project.id ? "Open (Current)" : "Open";
+    openBtn.addEventListener("click", async () => {
+      openBtn.disabled = true;
+      try {
+        const token = getAuthToken();
+        if (!token) {
+          window.location.href = "/signup";
+          return;
+        }
+        setSettingsProjectsStatus(`Opening ${project.name || "project"}...`);
+        const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/session`, {
+          method: "GET",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 401) {
+            handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+            return;
+          }
+          throw new Error(payload?.error || "Unable to open project.");
+        }
+
+        const session = payload?.session;
+        if (session && typeof session === "object") {
+          await restoreProjectFromPayload(session);
+        } else {
+          disposeAllPhotos();
+          state.photos = [];
+          state.photoHistory = {};
+          state.nextPhotoId = 1;
+          state.nextTextId = 1;
+          state.nextShapeId = 1;
+          clearSelectionUI();
+        }
+        persistCurrentProjectMeta({ id: project.id, name: project.name || "" });
+        setSettingsProjectsStatus(`Opened ${project.name || "project"}.`);
+        await refreshProjectsFromCloud();
+      } catch (error) {
+        setSettingsProjectsStatus(error?.message || "Unable to open project.");
+      } finally {
+        openBtn.disabled = false;
+      }
+    });
+
+    head.appendChild(name);
+    head.appendChild(openBtn);
+    item.appendChild(head);
+    item.appendChild(meta);
+    settingsProjectsList.appendChild(item);
+  });
+};
+
+const refreshProjectsFromCloud = async () => {
+  const token = getAuthToken();
+  if (!token) {
+    renderSettingsProjects([]);
+    setSettingsProjectsStatus("Sign in to manage projects.");
+    return;
+  }
+  const response = await fetch("/api/projects", {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(payload?.error || "Unable to load projects.");
+  }
+  const projects = Array.isArray(payload?.projects) ? payload.projects : [];
+  renderSettingsProjects(projects);
+  state.projectsLoaded = true;
+  if (!state.currentProjectId && projects[0]) {
+    persistCurrentProjectMeta({ id: projects[0].id, name: projects[0].name || "" });
+  }
+};
+
+const ensureProjectForSave = async () => {
+  if (state.currentProjectId) {
+    return { id: state.currentProjectId, name: state.currentProjectName || sanitizeProjectName(settingsProjectNameInput?.value || "") };
+  }
+  const token = getAuthToken();
+  if (!token) {
+    window.location.href = "/signup";
+    return null;
+  }
+  const fallbackName = `Session ${new Date().toISOString().slice(0, 10)}`;
+  const name = sanitizeProjectName(settingsProjectNameInput?.value || fallbackName) || fallbackName;
+  const response = await fetch("/api/projects", {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return null;
+    }
+    throw new Error(payload?.error || "Unable to create project.");
+  }
+  const project = payload?.project || {};
+  persistCurrentProjectMeta({ id: project.id || "", name: project.name || name });
+  return { id: String(project.id || ""), name: String(project.name || name) };
+};
+
+const saveCurrentSessionToCloudProject = async () => {
+  const ensured = await ensureProjectForSave();
+  if (!ensured?.id) return;
+  const payload = await getSerializedProjectPayload();
+  const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
+  const response = await fetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
+    method: "PUT",
+    headers: getJsonRequestHeaders(),
+    body: JSON.stringify({
+      name: projectName || ensured.name,
+      session: payload,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(result?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(result?.error || "Unable to save project.");
+  }
+  persistCurrentProjectMeta({ id: ensured.id, name: projectName || ensured.name });
+  setSettingsProjectsStatus(`Saved ${projectName || ensured.name || "project"}.`);
+  await refreshProjectsFromCloud();
+};
+
+const createFreshCloudProject = async () => {
+  const fallbackName = `Session ${new Date().toISOString().slice(0, 10)}`;
+  const name = sanitizeProjectName(settingsProjectNameInput?.value || fallbackName) || fallbackName;
+  const response = await fetch("/api/projects", {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(payload?.error || "Unable to create project.");
+  }
+
+  disposeAllPhotos();
+  state.photos = [];
+  state.photoHistory = {};
+  state.nextPhotoId = 1;
+  state.nextTextId = 1;
+  state.nextShapeId = 1;
+  clearSelectionUI();
+  const project = payload?.project || {};
+  persistCurrentProjectMeta({ id: project.id || "", name: project.name || name });
+  setSettingsProjectsStatus(`Created ${project.name || name}.`);
+  await refreshProjectsFromCloud();
 };
 
 const appendEditedPhotoFromDataUrl = async (editedImageDataUrl, sourcePhoto, options = {}) => {
@@ -3935,14 +4217,58 @@ settingsBuyCreditsBtn?.addEventListener("click", async () => {
     settingsBuyCreditsBtn.disabled = false;
   }
 });
-settingsProjectsBtn?.addEventListener("click", () => {
-  closeSettingsModal();
-  window.location.href = "/editor";
+settingsProjectsBtn?.addEventListener("click", async () => {
+  const isHidden = settingsProjectsPanel?.classList.contains("hidden-panel");
+  settingsProjectsPanel?.classList.toggle("hidden-panel", !isHidden);
+  if (!isHidden) return;
+  setSettingsProjectsStatus("Loading projects...");
+  try {
+    await refreshProjectsFromCloud();
+    if (!settingsProjectsStatus?.textContent) {
+      setSettingsProjectsStatus("");
+    }
+  } catch (error) {
+    setSettingsProjectsStatus(error?.message || "Unable to load projects.");
+  }
 });
 settingsShareBtn?.addEventListener("click", () => {
   const subject = encodeURIComponent("Check out DarkroomX");
   const body = encodeURIComponent("Check out DarkroomX: https://www.darkroomx.com");
   window.location.href = `mailto:?subject=${subject}&body=${body}`;
+});
+settingsProjectRefreshBtn?.addEventListener("click", async () => {
+  settingsProjectRefreshBtn.disabled = true;
+  setSettingsProjectsStatus("Refreshing...");
+  try {
+    await refreshProjectsFromCloud();
+    setSettingsProjectsStatus("Projects refreshed.");
+  } catch (error) {
+    setSettingsProjectsStatus(error?.message || "Unable to refresh projects.");
+  } finally {
+    settingsProjectRefreshBtn.disabled = false;
+  }
+});
+settingsProjectSaveBtn?.addEventListener("click", async () => {
+  settingsProjectSaveBtn.disabled = true;
+  setSettingsProjectsStatus("Saving project...");
+  try {
+    await saveCurrentSessionToCloudProject();
+  } catch (error) {
+    setSettingsProjectsStatus(error?.message || "Unable to save project.");
+  } finally {
+    settingsProjectSaveBtn.disabled = false;
+  }
+});
+settingsProjectNewBtn?.addEventListener("click", async () => {
+  settingsProjectNewBtn.disabled = true;
+  setSettingsProjectsStatus("Creating new project...");
+  try {
+    await createFreshCloudProject();
+  } catch (error) {
+    setSettingsProjectsStatus(error?.message || "Unable to create project.");
+  } finally {
+    settingsProjectNewBtn.disabled = false;
+  }
 });
 settingsModal?.addEventListener("pointerdown", (event) => {
   if (event.target === settingsModal) {
@@ -4307,5 +4633,6 @@ syncFilmstripActionState();
 syncHistoryControls();
 syncWorkspacePanCursor();
 syncCreditsUI();
+loadStoredProjectMeta();
 hydrateIcons();
 startAccessStatusPolling();

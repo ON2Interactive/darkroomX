@@ -564,6 +564,17 @@
             <button id="settingsBuyCreditsBtn" class="settings-modal-link" type="button">Credits</button>
             <button id="settingsProjectsBtn" class="settings-modal-link" type="button">Projects</button>
           </div>
+          <section id="settingsProjectsPanel" class="settings-projects-panel hidden-panel" aria-label="Project Sessions">
+            <label class="settings-projects-label" for="settingsProjectNameInput">Project Name</label>
+            <input id="settingsProjectNameInput" class="settings-projects-input" type="text" maxlength="120" placeholder="Session name" />
+            <div class="settings-projects-actions">
+              <button id="settingsProjectNewBtn" class="settings-projects-action" type="button">New</button>
+              <button id="settingsProjectSaveBtn" class="settings-projects-action" type="button">Save</button>
+              <button id="settingsProjectRefreshBtn" class="settings-projects-action" type="button">Refresh</button>
+            </div>
+            <p id="settingsProjectsStatus" class="settings-projects-status"></p>
+            <div id="settingsProjectsList" class="settings-projects-list" role="list"></div>
+          </section>
           <button id="settingsShareBtn" class="settings-modal-share" type="button" aria-label="Share DarkroomX" title="Share DarkroomX">
             <i data-lucide="share-2"></i>
           </button>
