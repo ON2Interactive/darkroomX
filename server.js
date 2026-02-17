@@ -2062,7 +2062,7 @@ async function handleProjectSessionSave(req, res, projectId) {
   }
 
   try {
-    const payload = await parseJsonBody(req, 40 * 1024 * 1024);
+    const payload = await parseJsonBody(req, 120 * 1024 * 1024);
     if (!payload || typeof payload?.session !== "object" || payload.session == null) {
       return sendJson(res, 400, { error: "Missing session payload." });
     }
@@ -2125,7 +2125,9 @@ async function handleProjectSessionSave(req, res, projectId) {
         : null,
     });
   } catch (error) {
-    return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+    const message = String(error?.message || "Invalid request payload.");
+    const isTooLarge = message.toLowerCase().includes("payload too large");
+    return sendJson(res, isTooLarge ? 413 : 400, { error: message });
   }
 }
 

@@ -3168,17 +3168,21 @@ const renderSettingsProjects = (projects = []) => {
         const session = payload?.session;
         if (session && typeof session === "object") {
           await restoreProjectFromPayload(session);
-        } else {
-          disposeAllPhotos();
-          state.photos = [];
-          state.photoHistory = {};
-          state.nextPhotoId = 1;
-          state.nextTextId = 1;
-          state.nextShapeId = 1;
-          clearSelectionUI();
+          persistCurrentProjectMeta({ id: project.id, name: project.name || "" });
+          setSettingsProjectsStatus(`Opened ${project.name || "project"}.`);
+          await refreshProjectsFromCloud();
+          return;
         }
+
         persistCurrentProjectMeta({ id: project.id, name: project.name || "" });
-        setSettingsProjectsStatus(`Opened ${project.name || "project"}.`);
+        if (settingsProjectNameInput) {
+          settingsProjectNameInput.value = project.name || settingsProjectNameInput.value || "";
+        } else {
+          // no-op: keep current session visible when selected project has no saved snapshot
+        }
+        setSettingsProjectsStatus(
+          `Selected ${project.name || "project"}. No saved snapshot found yet, click Save to store current studio state.`,
+        );
         await refreshProjectsFromCloud();
       } catch (error) {
         setSettingsProjectsStatus(error?.message || "Unable to open project.");
