@@ -28,6 +28,35 @@
               1:1
             </button>
           </div>
+          <div id="cropControlsTopbar" class="crop-controls-topbar hidden-panel" aria-hidden="true">
+            <select id="cropAspectSelect" aria-label="Crop Preset" title="Crop Preset">
+              <option value="original">Original</option>
+              <option value="free">Free</option>
+              <option value="1:1">1:1</option>
+              <option value="4:5">4:5</option>
+              <option value="8:10">8:10</option>
+              <option value="5:7">5:7</option>
+              <option value="3:2">3:2</option>
+              <option value="16:9">16:9</option>
+              <option value="custom">Custom</option>
+            </select>
+            <div id="cropCustomRatioInputs" class="crop-custom-ratio hidden-panel" aria-hidden="true">
+              <input id="cropCustomWidth" type="number" min="1" max="999" step="1" value="8" aria-label="Custom crop width" />
+              <span>:</span>
+              <input id="cropCustomHeight" type="number" min="1" max="999" step="1" value="10" aria-label="Custom crop height" />
+            </div>
+            <button id="cropRotateLeftBtn" class="icon-btn" type="button" aria-label="Rotate Left 90" title="Rotate Left 90">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+            <button id="cropRotateRightBtn" class="icon-btn" type="button" aria-label="Rotate Right 90" title="Rotate Right 90">
+              <i data-lucide="rotate-cw"></i>
+            </button>
+            <button id="cropResetRotationBtn" class="icon-btn" type="button" aria-label="Reset Rotation" title="Reset Rotation">
+              <i data-lucide="x"></i>
+            </button>
+            <button id="cropApplyBtn" type="button">Apply</button>
+            <button id="cropCancelBtn" type="button">Cancel</button>
+          </div>
         </div>
         <div class="topbar-right">
           <button id="undoBtn" class="icon-btn" type="button" aria-label="Undo" title="Undo">
@@ -132,18 +161,6 @@
             <img id="mainPreview" alt="Selected photo preview" />
             <div id="overlayLayer" class="overlay-layer"></div>
             <div id="cropOverlay" class="crop-overlay hidden-panel" aria-hidden="true">
-              <div class="crop-toolbar">
-                <label for="cropAspectSelect">Aspect</label>
-                <select id="cropAspectSelect">
-                  <option value="free">Free</option>
-                  <option value="1:1">1:1</option>
-                  <option value="4:5">4:5</option>
-                  <option value="3:2">3:2</option>
-                  <option value="16:9">16:9</option>
-                </select>
-                <button id="cropApplyBtn" type="button">Apply</button>
-                <button id="cropCancelBtn" type="button">Cancel</button>
-              </div>
               <div id="cropBox" class="crop-box">
                 <button type="button" class="crop-handle" data-crop-handle="nw" aria-label="Resize crop top left"></button>
                 <button type="button" class="crop-handle" data-crop-handle="ne" aria-label="Resize crop top right"></button>

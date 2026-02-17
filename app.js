@@ -12,7 +12,14 @@ const previewWrap = document.getElementById("previewWrap");
 const overlayLayer = document.getElementById("overlayLayer");
 const cropOverlay = document.getElementById("cropOverlay");
 const cropBox = document.getElementById("cropBox");
+const cropControlsTopbar = document.getElementById("cropControlsTopbar");
 const cropAspectSelect = document.getElementById("cropAspectSelect");
+const cropCustomRatioInputs = document.getElementById("cropCustomRatioInputs");
+const cropCustomWidth = document.getElementById("cropCustomWidth");
+const cropCustomHeight = document.getElementById("cropCustomHeight");
+const cropRotateLeftBtn = document.getElementById("cropRotateLeftBtn");
+const cropRotateRightBtn = document.getElementById("cropRotateRightBtn");
+const cropResetRotationBtn = document.getElementById("cropResetRotationBtn");
 const cropApplyBtn = document.getElementById("cropApplyBtn");
 const cropCancelBtn = document.getElementById("cropCancelBtn");
 const emptyState = document.getElementById("emptyState");
@@ -226,6 +233,8 @@ const CREDIT_COSTS = {
 const CROP_ASPECT_MAP = {
   "1:1": 1,
   "4:5": 4 / 5,
+  "8:10": 8 / 10,
+  "5:7": 5 / 7,
   "3:2": 3 / 2,
   "16:9": 16 / 9,
 };
@@ -305,7 +314,7 @@ const state = {
   accessCheckTimer: null,
   trialLocked: false,
   cropRect: null,
-  cropAspect: "free",
+  cropAspect: "original",
   cropDrag: null,
   currentProjectId: null,
   currentProjectName: "",
@@ -316,7 +325,7 @@ const state = {
 };
 
 if (cropAspectSelect?.value) {
-  state.cropAspect = String(cropAspectSelect.value || "free");
+  state.cropAspect = String(cropAspectSelect.value || "original");
 }
 
 const hydrateIcons = () => {
@@ -1244,8 +1253,27 @@ const applyPreviewTransform = () => {
   mainPreview.style.transform = `rotate(${photo.rotation}deg) scale(${state.zoom})`;
 };
 
+const getSelectedPhotoAspectRatio = () => {
+  const photo = getSelectedPhoto();
+  const width = Number(photo?.imgEl?.naturalWidth || photo?.width || 0);
+  const height = Number(photo?.imgEl?.naturalHeight || photo?.height || 0);
+  if (!width || !height) return null;
+  const quarterTurns = ((Number(photo?.rotation || 0) / 90) % 4 + 4) % 4;
+  const rotated = quarterTurns % 2 === 1;
+  return rotated ? height / width : width / height;
+};
+
 const getCropAspectRatio = () => {
   if (state.cropAspect === "free") return null;
+  if (state.cropAspect === "original") {
+    return getSelectedPhotoAspectRatio();
+  }
+  if (state.cropAspect === "custom") {
+    const width = Number(cropCustomWidth?.value || 0);
+    const height = Number(cropCustomHeight?.value || 0);
+    if (width > 0 && height > 0) return width / height;
+    return null;
+  }
   return CROP_ASPECT_MAP[state.cropAspect] || null;
 };
 
@@ -1305,6 +1333,15 @@ const renderCropOverlay = () => {
   const active = state.activeTool === "crop" && Boolean(getSelectedPhoto()) && Boolean(state.cropRect);
   cropOverlay.classList.toggle("hidden-panel", !active);
   cropOverlay.setAttribute("aria-hidden", active ? "false" : "true");
+  if (cropControlsTopbar) {
+    cropControlsTopbar.classList.toggle("hidden-panel", !active);
+    cropControlsTopbar.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+  if (cropCustomRatioInputs) {
+    const showCustom = active && state.cropAspect === "custom";
+    cropCustomRatioInputs.classList.toggle("hidden-panel", !showCustom);
+    cropCustomRatioInputs.setAttribute("aria-hidden", showCustom ? "false" : "true");
+  }
   if (!active) return;
 
   const bounds = getImageBoundsInPreview();
@@ -1344,6 +1381,14 @@ const clearCropState = () => {
   if (cropOverlay) {
     cropOverlay.classList.add("hidden-panel");
     cropOverlay.setAttribute("aria-hidden", "true");
+  }
+  if (cropControlsTopbar) {
+    cropControlsTopbar.classList.add("hidden-panel");
+    cropControlsTopbar.setAttribute("aria-hidden", "true");
+  }
+  if (cropCustomRatioInputs) {
+    cropCustomRatioInputs.classList.add("hidden-panel");
+    cropCustomRatioInputs.setAttribute("aria-hidden", "true");
   }
 };
 
@@ -1430,19 +1475,29 @@ const updateCropRectFromPointer = (event) => {
 const applyCropToSelectedPhoto = async () => {
   const photo = getSelectedPhoto();
   if (!photo || !photo.imgEl || !state.cropRect) return;
-  if (photo.rotation !== 0) {
-    window.alert("Reset rotation before cropping for now.");
-    return;
-  }
 
   const bounds = getImageBoundsInPreview();
   if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
   const crop = clampCropRectToBounds(state.cropRect, bounds);
 
-  const sx = Math.round(((crop.x - bounds.x) / bounds.width) * photo.imgEl.naturalWidth);
-  const sy = Math.round(((crop.y - bounds.y) / bounds.height) * photo.imgEl.naturalHeight);
-  const sw = Math.round((crop.width / bounds.width) * photo.imgEl.naturalWidth);
-  const sh = Math.round((crop.height / bounds.height) * photo.imgEl.naturalHeight);
+  const source = photo.imgEl;
+  const radians = (photo.rotation * Math.PI) / 180;
+  const quarterTurns = ((photo.rotation / 90) % 4 + 4) % 4;
+  const swapDimensions = quarterTurns % 2 === 1;
+
+  const workingCanvas = document.createElement("canvas");
+  workingCanvas.width = swapDimensions ? source.naturalHeight : source.naturalWidth;
+  workingCanvas.height = swapDimensions ? source.naturalWidth : source.naturalHeight;
+  const workingCtx = workingCanvas.getContext("2d");
+  if (!workingCtx) return;
+  workingCtx.translate(workingCanvas.width / 2, workingCanvas.height / 2);
+  workingCtx.rotate(radians);
+  workingCtx.drawImage(source, -source.naturalWidth / 2, -source.naturalHeight / 2);
+
+  const sx = Math.round(((crop.x - bounds.x) / bounds.width) * workingCanvas.width);
+  const sy = Math.round(((crop.y - bounds.y) / bounds.height) * workingCanvas.height);
+  const sw = Math.round((crop.width / bounds.width) * workingCanvas.width);
+  const sh = Math.round((crop.height / bounds.height) * workingCanvas.height);
   if (sw < 2 || sh < 2) return;
 
   const canvas = document.createElement("canvas");
@@ -1450,7 +1505,7 @@ const applyCropToSelectedPhoto = async () => {
   canvas.height = sh;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  ctx.drawImage(photo.imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+  ctx.drawImage(workingCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
   const sourceType = String(photo.file?.type || "").toLowerCase();
   const outputType = sourceType === "image/png" ? "image/png" : "image/jpeg";
@@ -3970,7 +4025,9 @@ const setActiveTool = (tool) => {
   }
   if (tool === "crop") {
     state.compareMode = false;
-    if (cropAspectSelect) cropAspectSelect.value = state.cropAspect;
+    if (cropAspectSelect) cropAspectSelect.value = state.cropAspect || "original";
+    if (cropCustomWidth && !cropCustomWidth.value) cropCustomWidth.value = "8";
+    if (cropCustomHeight && !cropCustomHeight.value) cropCustomHeight.value = "10";
     initializeCropRect();
   } else {
     clearCropState();
@@ -4851,10 +4908,6 @@ toolSelectBtn.addEventListener("click", () => setActiveTool("select"));
 toolCropBtn.addEventListener("click", () => {
   const photo = getSelectedPhoto();
   if (!photo) return;
-  if (photo.rotation !== 0) {
-    window.alert("Reset rotation before cropping for now.");
-    return;
-  }
   setActiveTool("crop");
 });
 toolTextBtn.addEventListener("click", () => {
@@ -4926,12 +4979,39 @@ toolSettingsBtn?.addEventListener("click", () => {
 });
 
 cropAspectSelect?.addEventListener("change", (event) => {
-  state.cropAspect = String(event.target.value || "free");
+  state.cropAspect = String(event.target.value || "original");
   const bounds = getImageBoundsInPreview();
   if (!bounds || !state.cropRect) return;
   const aspect = getCropAspectRatio();
   state.cropRect = fitCropRectToAspect(state.cropRect, bounds, aspect);
   renderCropOverlay();
+});
+
+const handleCropCustomRatioInput = () => {
+  if (state.activeTool !== "crop") return;
+  const bounds = getImageBoundsInPreview();
+  if (!bounds || !state.cropRect) return;
+  const aspect = getCropAspectRatio();
+  state.cropRect = fitCropRectToAspect(state.cropRect, bounds, aspect);
+  renderCropOverlay();
+};
+
+cropCustomWidth?.addEventListener("input", handleCropCustomRatioInput);
+cropCustomHeight?.addEventListener("input", handleCropCustomRatioInput);
+
+cropRotateLeftBtn?.addEventListener("click", () => {
+  rotateSelected(-90);
+  if (state.activeTool === "crop") initializeCropRect();
+});
+
+cropRotateRightBtn?.addEventListener("click", () => {
+  rotateSelected(90);
+  if (state.activeTool === "crop") initializeCropRect();
+});
+
+cropResetRotationBtn?.addEventListener("click", () => {
+  resetSelectedRotation();
+  if (state.activeTool === "crop") initializeCropRect();
 });
 
 cropCancelBtn?.addEventListener("click", () => {

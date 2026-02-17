@@ -1452,6 +1452,9 @@ body {
 }
 
 .topbar-center {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   justify-self: center;
 }
 
@@ -1486,6 +1489,47 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.crop-controls-topbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(17, 17, 17, 0.86);
+}
+
+.crop-controls-topbar select,
+.crop-controls-topbar input,
+.crop-controls-topbar button {
+  border: 1px solid var(--line);
+  background: #262626;
+  color: var(--text);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.crop-controls-topbar select {
+  min-width: 116px;
+}
+
+.crop-custom-ratio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crop-custom-ratio span {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.crop-custom-ratio input {
+  width: 62px;
+  text-align: center;
 }
 
 .zoom-level {
@@ -1734,37 +1778,6 @@ body {
   inset: 0;
   z-index: 2400;
   pointer-events: auto;
-}
-
-.crop-toolbar {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(17, 17, 17, 0.92);
-  backdrop-filter: blur(6px);
-  pointer-events: auto;
-}
-
-.crop-toolbar label {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
-.crop-toolbar select,
-.crop-toolbar button {
-  border: 1px solid var(--line);
-  background: #262626;
-  color: var(--text);
-  border-radius: 8px;
-  min-height: 34px;
-  padding: 6px 10px;
 }
 
 .crop-box {

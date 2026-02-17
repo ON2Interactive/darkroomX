@@ -1847,6 +1847,16 @@ function buildProjectSessionObjectPath(userId, projectId) {
   return `${encodeURIComponent(String(userId || "").trim())}/${encodeURIComponent(String(projectId || "").trim())}.json`;
 }
 
+function isStorageObjectMissingReason(reason = "") {
+  const text = String(reason || "").toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("object not found") ||
+    text.includes('"error":"not_found"') ||
+    text.includes('"error":"object_not_found"')
+  );
+}
+
 async function ensureProjectSessionsBucket(service) {
   const { config, headers } = service;
   const checkResponse = await fetch(`${config.url}/storage/v1/bucket/${PROJECT_SESSIONS_BUCKET}`, {
@@ -2024,7 +2034,7 @@ async function handleProjectSessionLoad(req, res, projectId) {
   }
   if (!response.ok) {
     const reason = await response.text().catch(() => "");
-    if (String(reason || "").toLowerCase().includes("bucket not found")) {
+    if (String(reason || "").toLowerCase().includes("bucket not found") || isStorageObjectMissingReason(reason)) {
       return sendJson(res, 200, { project, session: null });
     }
     return sendJson(res, 502, { error: `Unable to load project session.${reason ? ` ${reason}` : ""}` });
