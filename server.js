@@ -192,6 +192,25 @@ function getTrialWindowMs() {
   return hours * 60 * 60 * 1000;
 }
 
+function getAccessBypassEmailSet() {
+  const csv = normalizeEnvValue(process.env.ACCESS_BYPASS_EMAILS || "");
+  const set = new Set(
+    csv
+      .split(",")
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const adminEmail = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || "").toLowerCase();
+  if (adminEmail) set.add(adminEmail);
+  return set;
+}
+
+function userHasAccessBypass(user) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  if (!email) return false;
+  return getAccessBypassEmailSet().has(email);
+}
+
 function isSubscriptionActiveStatus(status) {
   return status === "active" || status === "trialing";
 }
@@ -405,6 +424,21 @@ async function getUserAccessStatus(req, user) {
   const userId = String(user?.id || "").trim();
   if (!userId) {
     return { ok: false, status: 401, error: "Unauthorized." };
+  }
+
+  if (userHasAccessBypass(user)) {
+    const nowMs = Date.now();
+    return {
+      ok: true,
+      enforced: false,
+      bypassed: true,
+      subscriptionActive: true,
+      trialActive: true,
+      accessAllowed: true,
+      trialStartsAt: new Date(nowMs).toISOString(),
+      trialEndsAt: new Date(nowMs + getTrialWindowMs()).toISOString(),
+      now: new Date(nowMs).toISOString(),
+    };
   }
 
   const subscriptionAccess = await ensureUserHasActiveSubscription(req, user);
