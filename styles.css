@@ -2683,6 +2683,20 @@ body {
   gap: 12px;
 }
 
+.wallart-meta {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.wallart-helper {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .settings-modal-card {
   width: 100vw;
   height: 100vh;

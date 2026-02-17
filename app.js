@@ -108,6 +108,7 @@ const wallartModal = document.getElementById("wallartModal");
 const wallartModalCloseBtn = document.getElementById("wallartModalCloseBtn");
 const wallartPreview = document.getElementById("wallartPreview");
 const wallartProduct = document.getElementById("wallartProduct");
+const wallartMeta = document.getElementById("wallartMeta");
 const wallartStatus = document.getElementById("wallartStatus");
 const wallartCancelBtn = document.getElementById("wallartCancelBtn");
 const wallartContinueBtn = document.getElementById("wallartContinueBtn");
@@ -3001,8 +3002,14 @@ const openWallartModal = async () => {
       wallartPreview.src = previewDataUrl;
       wallartPreview.alt = `${photo.file?.name || "Selected photo"} preview`;
     }
+    const width = Number(photo.width || photo.imgEl?.naturalWidth || 0);
+    const height = Number(photo.height || photo.imgEl?.naturalHeight || 0);
+    if (wallartMeta) {
+      const dimensions = width > 0 && height > 0 ? ` • ${width} x ${height}` : "";
+      wallartMeta.textContent = `${photo.file?.name || "Selected image"}${dimensions}`;
+    }
     if (wallartStatus) {
-      wallartStatus.textContent = `Selected image: ${photo.file?.name || "Untitled"}`;
+      wallartStatus.textContent = "Ready to continue.";
     }
   } catch (error) {
     if (wallartStatus) {
@@ -5410,10 +5417,16 @@ wallartModalCloseBtn?.addEventListener("click", closeWallartModal);
 wallartCancelBtn?.addEventListener("click", closeWallartModal);
 wallartContinueBtn?.addEventListener("click", async () => {
   wallartContinueBtn.disabled = true;
+  if (wallartStatus) {
+    wallartStatus.textContent = "Opening checkout...";
+  }
   try {
     await beginCanvasPopWallartOrder();
   } catch (error) {
     window.alert(error?.message || "Unable to start Wallart checkout.");
+    if (wallartStatus) {
+      wallartStatus.textContent = "Unable to open checkout. Please try again.";
+    }
   } finally {
     wallartContinueBtn.disabled = false;
   }
