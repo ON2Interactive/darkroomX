@@ -81,6 +81,8 @@ const editCancelBtn = document.getElementById("editCancelBtn");
 const editSubmitBtn = document.getElementById("editSubmitBtn");
 const editProcessingOverlay = document.getElementById("editProcessingOverlay");
 const editProcessingStatus = document.getElementById("editProcessingStatus");
+const rawProcessingOverlay = document.getElementById("rawProcessingOverlay");
+const rawProcessingStatus = document.getElementById("rawProcessingStatus");
 const generateModal = document.getElementById("generateModal");
 const generatePromptInput = document.getElementById("generatePromptInput");
 const generateResolutionSelect = document.getElementById("generateResolutionSelect");
@@ -2469,6 +2471,14 @@ const setPrintModalStatus = (message) => {
   printModalStatus.textContent = message || "";
 };
 
+const setRawProcessingState = (busy, message = "Processing RAW file...") => {
+  if (!rawProcessingOverlay) return;
+  rawProcessingOverlay.classList.toggle("hidden-panel", !busy);
+  if (rawProcessingStatus) {
+    rawProcessingStatus.textContent = message;
+  }
+};
+
 const setEditSubmitState = (busy) => {
   state.isSubmittingEdit = busy;
   appShell.classList.toggle("interaction-locked", busy);
@@ -4233,17 +4243,28 @@ const handleFolderUpload = async (event) => {
   const convertedRawFiles = [];
   const unresolvedRejectedFiles = [];
   const rawConversionErrors = [];
+  const rawFilesPending = files.filter((file) => isRawUploadFile(file)).length;
 
-  for (const rejected of rejectedFiles) {
-    if (isRawUploadFile(rejected)) {
-      const convertedResult = await convertRawToPreviewFile(rejected);
-      if (convertedResult.file) {
-        convertedRawFiles.push(convertedResult.file);
-        continue;
+  if (rawFilesPending > 0) {
+    setRawProcessingState(true, rawFilesPending === 1 ? "Processing RAW file..." : `Processing ${rawFilesPending} RAW files...`);
+  }
+
+  try {
+    for (const rejected of rejectedFiles) {
+      if (isRawUploadFile(rejected)) {
+        const convertedResult = await convertRawToPreviewFile(rejected);
+        if (convertedResult.file) {
+          convertedRawFiles.push(convertedResult.file);
+          continue;
+        }
+        rawConversionErrors.push(`${rejected.name}: ${convertedResult.error || "Conversion failed."}`);
       }
-      rawConversionErrors.push(`${rejected.name}: ${convertedResult.error || "Conversion failed."}`);
+      unresolvedRejectedFiles.push(rejected);
     }
-    unresolvedRejectedFiles.push(rejected);
+  } finally {
+    if (rawFilesPending > 0) {
+      setRawProcessingState(false);
+    }
   }
 
   const importFiles = [...decodableFiles, ...convertedRawFiles];
