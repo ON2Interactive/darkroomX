@@ -239,6 +239,11 @@ const CROP_ASPECT_MAP = {
   "16:9": 16 / 9,
 };
 const MIN_CROP_SIZE_PX = 40;
+const SESSION_SAVE_MAX_DIMENSION = 2048;
+const SESSION_SAVE_JPEG_QUALITY_START = 0.88;
+const SESSION_SAVE_JPEG_QUALITY_MIN = 0.55;
+const SESSION_SAVE_TARGET_BYTES = 1_400_000;
+const CLOUD_SESSION_REQUEST_SOFT_LIMIT_BYTES = 4_000_000;
 const toneDragState = {
   levelsHandle: null,
   curvesHandleIndex: null,
@@ -373,6 +378,14 @@ const dataUrlToFile = (dataUrl, fileName = `photo-${Date.now()}.png`) => {
   const blob = dataUrlToBlob(dataUrl);
   return new File([blob], fileName, { type: blob.type, lastModified: Date.now() });
 };
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to serialize image blob."));
+    reader.readAsDataURL(blob);
+  });
 
 const disposePhotoResources = (photo) => {
   if (photo?.url) URL.revokeObjectURL(photo.url);
@@ -2869,7 +2882,7 @@ const createPhotoRecord = (file, overrides = {}) => {
 };
 
 const getProjectPhotoPayload = async (photo) => {
-  const imageDataUrl = photo.file ? await fileToDataUrl(photo.file) : null;
+  const imageDataUrl = photo.file ? await buildSessionPreviewDataUrl(photo) : null;
   return {
     id: photo.id,
     fileName: photo.file?.name || `photo-${photo.id}.png`,
@@ -2888,6 +2901,52 @@ const getProjectPhotoPayload = async (photo) => {
     rootPhotoId: photo.rootPhotoId ?? photo.id,
     editVersion: Number(photo.editVersion ?? 0),
   };
+};
+
+const buildSessionPreviewDataUrl = async (photo) => {
+  const source = photo?.imgEl;
+  if (!source?.naturalWidth || !source?.naturalHeight) {
+    return fileToDataUrl(photo.file);
+  }
+
+  const maxDimension = SESSION_SAVE_MAX_DIMENSION;
+  const scale = Math.min(1, maxDimension / Math.max(source.naturalWidth, source.naturalHeight));
+  const width = Math.max(1, Math.round(source.naturalWidth * scale));
+  const height = Math.max(1, Math.round(source.naturalHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return fileToDataUrl(photo.file);
+  }
+  ctx.drawImage(source, 0, 0, width, height);
+
+  let quality = SESSION_SAVE_JPEG_QUALITY_START;
+  let blob = await canvasToBlob(canvas, "image/jpeg", quality);
+  if (!blob) {
+    return fileToDataUrl(photo.file);
+  }
+
+  while (blob.size > SESSION_SAVE_TARGET_BYTES && quality > SESSION_SAVE_JPEG_QUALITY_MIN) {
+    quality = Math.max(SESSION_SAVE_JPEG_QUALITY_MIN, quality - 0.08);
+    const nextBlob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (!nextBlob) break;
+    blob = nextBlob;
+  }
+
+  return blobToDataUrl(blob);
+};
+
+const readErrorMessageFromResponse = async (response, fallbackMessage) => {
+  const payload = await response.clone().json().catch(() => null);
+  const fromPayload = String(payload?.error || "").trim();
+  if (fromPayload) return fromPayload;
+  const raw = await response.text().catch(() => "");
+  const trimmed = String(raw || "").trim();
+  if (trimmed) return `${fallbackMessage} (${response.status})`;
+  return fallbackMessage;
 };
 
 const sanitizeProjectName = (name) => {
@@ -3258,24 +3317,28 @@ const saveCurrentSessionToCloudProject = async () => {
   const ensured = await ensureProjectForSave();
   if (!ensured?.id) return;
   const payload = await getSerializedProjectPayload();
+  const requestBody = JSON.stringify({
+    name: sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "") || ensured.name,
+    session: payload,
+  });
+  if (new Blob([requestBody]).size > CLOUD_SESSION_REQUEST_SOFT_LIMIT_BYTES) {
+    throw new Error("Project is too large to save right now. Reduce loaded images or split into a new project.");
+  }
   const payloadDigest = getSessionPayloadDigest(payload);
-  const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
   const response = await authFetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
     method: "PUT",
     headers: getJsonRequestHeaders(),
-    body: JSON.stringify({
-      name: projectName || ensured.name,
-      session: payload,
-    }),
+    body: requestBody,
   });
-  const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401) {
-      handleExpiredAuthSession(result?.error || "Invalid or expired auth session.");
+      handleExpiredAuthSession("Invalid or expired auth session.");
       return;
     }
-    throw new Error(result?.error || "Unable to save project.");
+    throw new Error(await readErrorMessageFromResponse(response, "Unable to save project."));
   }
+  const result = await response.json().catch(() => ({}));
+  const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
   persistCurrentProjectMeta({ id: ensured.id, name: projectName || ensured.name });
   state.lastAutosaveDigest = payloadDigest;
   setSettingsProjectsStatus(`Saved ${projectName || ensured.name || "project"}.`);
@@ -3309,15 +3372,15 @@ const runCloudAutosave = async () => {
 
     const ensured = await ensureProjectForSave({ silent: true });
     if (!ensured?.id) return;
-
-    const projectName = sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "");
+    const requestBody = JSON.stringify({
+      name: sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "") || ensured.name,
+      session: payload,
+    });
+    if (new Blob([requestBody]).size > CLOUD_SESSION_REQUEST_SOFT_LIMIT_BYTES) return;
     const response = await authFetch(`/api/projects/${encodeURIComponent(ensured.id)}/session`, {
       method: "PUT",
       headers: getJsonRequestHeaders(),
-      body: JSON.stringify({
-        name: projectName || ensured.name,
-        session: payload,
-      }),
+      body: requestBody,
     });
     if (!response.ok) return;
     state.lastAutosaveDigest = digest;
