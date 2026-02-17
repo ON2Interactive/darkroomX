@@ -104,6 +104,13 @@ const printModalCloseBtn = document.getElementById("printModalCloseBtn");
 const printCancelBtn = document.getElementById("printCancelBtn");
 const printSubmitBtn = document.getElementById("printSubmitBtn");
 const printModalStatus = document.getElementById("printModalStatus");
+const wallartModal = document.getElementById("wallartModal");
+const wallartModalCloseBtn = document.getElementById("wallartModalCloseBtn");
+const wallartPreview = document.getElementById("wallartPreview");
+const wallartProduct = document.getElementById("wallartProduct");
+const wallartStatus = document.getElementById("wallartStatus");
+const wallartCancelBtn = document.getElementById("wallartCancelBtn");
+const wallartContinueBtn = document.getElementById("wallartContinueBtn");
 const creditsModal = document.getElementById("creditsModal");
 const creditsModalTitle = document.getElementById("creditsModalTitle");
 const creditsModalCloseBtn = document.getElementById("creditsModalCloseBtn");
@@ -2903,6 +2910,116 @@ const submitPeechoPrintOrder = async () => {
   }
 };
 
+const buildSelectedPhotoWallartDataUrl = async () => {
+  const photo = getSelectedPhoto();
+  if (!photo || !photo.imgEl) {
+    throw new Error("Select a photo first.");
+  }
+
+  const source = photo.imgEl;
+  const radians = (photo.rotation * Math.PI) / 180;
+  const quarterTurns = ((photo.rotation / 90) % 4 + 4) % 4;
+  const swapDimensions = quarterTurns % 2 === 1;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = swapDimensions ? source.naturalHeight : source.naturalWidth;
+  canvas.height = swapDimensions ? source.naturalWidth : source.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Unable to render wallart preview.");
+  }
+
+  ctx.filter = buildCompositeFilter(photo);
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(radians);
+  ctx.drawImage(source, -source.naturalWidth / 2, -source.naturalHeight / 2);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.98);
+  if (!String(dataUrl || "").startsWith("data:image/")) {
+    throw new Error("Unable to generate wallart preview.");
+  }
+  return dataUrl;
+};
+
+const beginCanvasPopWallartOrder = async () => {
+  if (!getAuthToken() && !getRefreshToken()) {
+    window.location.href = "/signup";
+    return;
+  }
+
+  const photo = getSelectedPhoto();
+  if (!photo) {
+    window.alert("Select a photo first.");
+    return;
+  }
+
+  const imageDataUrl = await buildSelectedPhotoWallartDataUrl();
+  const response = await authFetch("/api/canvaspop/pull-url", {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: JSON.stringify({
+      imageDataUrl,
+      fileName: buildExportFilename(photo.file?.name || "wallart").replace(/\.png$/i, ".jpg"),
+      productType: String(wallartProduct?.value || "framed_print"),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(payload?.error || "Unable to start Wallart checkout.");
+  }
+
+  const checkoutUrl = String(payload?.checkoutUrl || "").trim();
+  if (!checkoutUrl) {
+    throw new Error("Missing checkout URL.");
+  }
+  window.open(checkoutUrl, "_blank", "noopener");
+};
+
+const openWallartModal = async () => {
+  const photo = getSelectedPhoto();
+  if (!photo) return;
+  if (!wallartModal) {
+    await beginCanvasPopWallartOrder();
+    return;
+  }
+  if (wallartStatus) {
+    wallartStatus.textContent = "Preparing selected image preview...";
+  }
+  if (wallartContinueBtn) {
+    wallartContinueBtn.disabled = true;
+  }
+  wallartModal.classList.remove("hidden-panel");
+  hydrateIcons();
+  try {
+    const previewDataUrl = await buildSelectedPhotoWallartDataUrl();
+    if (wallartPreview) {
+      wallartPreview.src = previewDataUrl;
+      wallartPreview.alt = `${photo.file?.name || "Selected photo"} preview`;
+    }
+    if (wallartStatus) {
+      wallartStatus.textContent = `Selected image: ${photo.file?.name || "Untitled"}`;
+    }
+  } catch (error) {
+    if (wallartStatus) {
+      wallartStatus.textContent = error?.message || "Unable to prepare preview.";
+    }
+  } finally {
+    if (wallartContinueBtn) {
+      wallartContinueBtn.disabled = false;
+    }
+  }
+};
+
+const closeWallartModal = () => {
+  if (!wallartModal) return;
+  wallartModal.classList.add("hidden-panel");
+};
+
 const createPhotoRecord = (file, overrides = {}) => {
   const id = state.nextPhotoId++;
   const safeFile = file || new File([], `photo-${id}.png`, { type: "image/png", lastModified: Date.now() });
@@ -5132,7 +5249,9 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 toolPrintBtn.addEventListener("click", () => {
-  window.print();
+  openWallartModal().catch((error) => {
+    window.alert(error?.message || "Unable to open Wallart checkout.");
+  });
 });
 toolLibraryBtn?.addEventListener("click", () => {
   void openLibraryModal();
@@ -5231,7 +5350,9 @@ window.addEventListener("resize", () => {
 });
 orderPrintBtn.addEventListener("click", () => {
   if (!getSelectedPhoto()) return;
-  openPrintModal();
+  openWallartModal().catch((error) => {
+    window.alert(error?.message || "Unable to open Wallart checkout.");
+  });
 });
 creditsBtn.addEventListener("click", () => {
   if (state.credits <= 0) {
@@ -5283,6 +5404,23 @@ printSubmitBtn.addEventListener("click", submitPeechoPrintOrder);
 printModal.addEventListener("pointerdown", (event) => {
   if (event.target === printModal) {
     closePrintModal();
+  }
+});
+wallartModalCloseBtn?.addEventListener("click", closeWallartModal);
+wallartCancelBtn?.addEventListener("click", closeWallartModal);
+wallartContinueBtn?.addEventListener("click", async () => {
+  wallartContinueBtn.disabled = true;
+  try {
+    await beginCanvasPopWallartOrder();
+  } catch (error) {
+    window.alert(error?.message || "Unable to start Wallart checkout.");
+  } finally {
+    wallartContinueBtn.disabled = false;
+  }
+});
+wallartModal?.addEventListener("pointerdown", (event) => {
+  if (event.target === wallartModal) {
+    closeWallartModal();
   }
 });
 

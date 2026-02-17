@@ -598,6 +598,37 @@
       </div>
     </div>
 
+    <div id="wallartModal" class="modal-backdrop hidden-panel" role="dialog" aria-modal="true" aria-label="Order Wallart">
+      <div class="modal-card wallart-modal-card">
+        <div class="modal-header">
+          <h3>Order Wallart</h3>
+          <button id="wallartModalCloseBtn" class="icon-btn" type="button" aria-label="Close Wallart Modal">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-body wallart-modal-body">
+          <div class="wallart-preview-wrap">
+            <img id="wallartPreview" class="wallart-preview-image" alt="Selected image for wallart order" />
+          </div>
+          <div class="wallart-modal-controls">
+            <div class="control-row text-control-row">
+              <label for="wallartProduct">Product</label>
+              <select id="wallartProduct">
+                <option value="framed_print">Framed Print</option>
+                <option value="canvas_print">Canvas Print</option>
+                <option value="metal_print">Metal Print</option>
+              </select>
+            </div>
+            <p id="wallartStatus" class="modal-status">Preparing selected image preview...</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="wallartCancelBtn" class="modal-text-btn" type="button">Cancel</button>
+          <button id="wallartContinueBtn" class="modal-text-btn modal-text-btn-primary" type="button">Continue to Checkout</button>
+        </div>
+      </div>
+    </div>
+
     <div id="creditsModal" class="modal-backdrop hidden-panel" role="dialog" aria-modal="true" aria-label="Credits">
       <div class="modal-card credits-modal-card">
         <div class="modal-header">

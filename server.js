@@ -186,6 +186,17 @@ function getCloudConvertConfig() {
   return { apiKey, outputFormat, jpgQuality, timeoutMs };
 }
 
+function getCanvasPopConfig() {
+  const accessKey = normalizeEnvValue(process.env.CANVASPOP_ACCESS_KEY || "");
+  const secretKey = normalizeEnvValue(process.env.CANVASPOP_SECRET_KEY || "");
+  const storeBaseUrl = normalizeEnvValue(process.env.CANVASPOP_STORE_BASE_URL || "https://store.canvaspop.com").replace(/\/$/, "");
+  const signedUrlTtlSecondsRaw = Number(process.env.CANVASPOP_SIGNED_URL_TTL_SECONDS || "900");
+  const signedUrlTtlSeconds = Number.isFinite(signedUrlTtlSecondsRaw)
+    ? Math.max(120, Math.min(60 * 60, Math.floor(signedUrlTtlSecondsRaw)))
+    : 900;
+  return { accessKey, secretKey, storeBaseUrl, signedUrlTtlSeconds };
+}
+
 function getTrialWindowMs() {
   const hoursRaw = Number(process.env.TRIAL_HOURS || "24");
   const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, Math.floor(hoursRaw))) : 24;
@@ -1863,6 +1874,7 @@ async function handleAdminUserEmail(req, res) {
 }
 
 const PROJECT_SESSIONS_BUCKET = "project-sessions";
+const CANVASPOP_UPLOADS_BUCKET = "canvaspop-uploads";
 
 function buildProjectSessionObjectPath(userId, projectId) {
   return `${encodeURIComponent(String(userId || "").trim())}/${encodeURIComponent(String(projectId || "").trim())}.json`;
@@ -1876,6 +1888,56 @@ function isStorageObjectMissingReason(reason = "") {
     text.includes('"error":"not_found"') ||
     text.includes('"error":"object_not_found"')
   );
+}
+
+function getImageExtensionFromMimeType(mimeType = "") {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("webp")) return "webp";
+  return "jpg";
+}
+
+async function ensureCanvasPopUploadsBucket(service) {
+  const { config, headers } = service;
+  const checkResponse = await fetch(`${config.url}/storage/v1/bucket/${CANVASPOP_UPLOADS_BUCKET}`, {
+    method: "GET",
+    headers,
+  });
+  if (checkResponse.ok) return { ok: true };
+  const reason = await checkResponse.text().catch(() => "");
+  const bucketMissing = checkResponse.status === 404 || String(reason || "").toLowerCase().includes("bucket not found");
+  if (!bucketMissing) {
+    return { ok: false, status: 502, error: `Unable to check CanvasPop upload bucket.${reason ? ` ${reason}` : ""}` };
+  }
+
+  const createResponse = await fetch(`${config.url}/storage/v1/bucket`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      id: CANVASPOP_UPLOADS_BUCKET,
+      name: CANVASPOP_UPLOADS_BUCKET,
+      public: false,
+      allowed_mime_types: ["image/jpeg", "image/png", "image/webp"],
+      file_size_limit: 30 * 1024 * 1024,
+    }),
+  });
+  if (!createResponse.ok && createResponse.status !== 409) {
+    const createReason = await createResponse.text().catch(() => "");
+    return { ok: false, status: 502, error: `Unable to create CanvasPop upload bucket.${createReason ? ` ${createReason}` : ""}` };
+  }
+  return { ok: true };
+}
+
+function buildCanvasPopUploadObjectPath(userId, fileName, mimeType) {
+  const extension = getImageExtensionFromMimeType(mimeType);
+  const sanitized = sanitizeFileName(fileName || `wallart-${Date.now()}.${extension}`);
+  const dot = sanitized.lastIndexOf(".");
+  const stem = dot > 0 ? sanitized.slice(0, dot) : sanitized;
+  const safeName = `${stem}.${extension}`.slice(0, 200);
+  const userSegment = encodeURIComponent(String(userId || "anonymous"));
+  const uniqueSegment = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+  return `${userSegment}/${uniqueSegment}-${safeName}`;
 }
 
 async function ensureProjectSessionsBucket(service) {
@@ -3377,6 +3439,84 @@ function handlePeechoFramedOfferings(_req, res) {
   return sendJson(res, 200, { offerings });
 }
 
+async function handleCanvasPopPullUrl(req, res) {
+  const authResult = await getAuthenticatedSupabaseUser(req);
+  if (!authResult.ok) {
+    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
+  }
+
+  const canvasPop = getCanvasPopConfig();
+  if (!canvasPop.accessKey) {
+    return sendJson(res, 500, { error: "CanvasPop is not configured. Missing CANVASPOP_ACCESS_KEY." });
+  }
+
+  const service = getSupabaseServiceHeaders(req);
+  if (!service.ok) {
+    return sendJson(res, 500, { error: service.error });
+  }
+
+  try {
+    const payload = await parseJsonBody(req, 40 * 1024 * 1024);
+    const imageDataUrl = String(payload?.imageDataUrl || "").trim();
+    const fileName = sanitizeFileName(String(payload?.fileName || "wallart-preview.jpg"));
+    const decoded = decodeDataUrl(imageDataUrl);
+    if (!decoded?.buffer?.length) {
+      return sendJson(res, 400, { error: "Invalid image payload." });
+    }
+    if (!/^image\/(png|jpeg|jpg|webp)$/i.test(decoded.mimeType || "")) {
+      return sendJson(res, 400, { error: "Unsupported image type for Wallart. Use JPEG, PNG, or WEBP." });
+    }
+
+    const bucketReady = await ensureCanvasPopUploadsBucket(service);
+    if (!bucketReady.ok) {
+      return sendJson(res, bucketReady.status || 500, { error: bucketReady.error || "Unable to prepare CanvasPop upload bucket." });
+    }
+
+    const userId = String(authResult.user?.id || "").trim();
+    const objectPath = buildCanvasPopUploadObjectPath(userId, fileName, decoded.mimeType);
+    const { config, headers } = service;
+
+    const uploadResponse = await fetch(`${config.url}/storage/v1/object/${CANVASPOP_UPLOADS_BUCKET}/${objectPath}`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": decoded.mimeType,
+        "x-upsert": "false",
+      },
+      body: decoded.buffer,
+    });
+    if (!uploadResponse.ok) {
+      const reason = await uploadResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to upload Wallart preview.${reason ? ` ${reason}` : ""}` });
+    }
+
+    const signResponse = await fetch(`${config.url}/storage/v1/object/sign/${CANVASPOP_UPLOADS_BUCKET}/${objectPath}`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expiresIn: canvasPop.signedUrlTtlSeconds }),
+    });
+    if (!signResponse.ok) {
+      const reason = await signResponse.text().catch(() => "");
+      return sendJson(res, 502, { error: `Unable to sign Wallart preview URL.${reason ? ` ${reason}` : ""}` });
+    }
+
+    const signPayload = await signResponse.json().catch(() => ({}));
+    const signedRelativeUrl = String(signPayload?.signedURL || "").trim();
+    if (!signedRelativeUrl) {
+      return sendJson(res, 502, { error: "Storage sign URL response was empty." });
+    }
+
+    const publicImageUrl = `${config.url}/storage/v1${signedRelativeUrl}`;
+    const checkoutUrl = `${canvasPop.storeBaseUrl}/api/pull?access_key=${encodeURIComponent(canvasPop.accessKey)}&image_url=${encodeURIComponent(publicImageUrl)}`;
+    return sendJson(res, 200, { ok: true, checkoutUrl });
+  } catch (error) {
+    return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+  }
+}
+
 function serveStatic(req, res) {
   const rawPath = decodeURIComponent(req.url.split("?")[0] || "/");
   if (rawPath === "/admin" && !isAdminAuthenticated(req)) {
@@ -3572,6 +3712,10 @@ function requestHandler(req, res) {
   }
   if (req.method === "GET" && pathname === "/api/peecho/framed-offerings") {
     handlePeechoFramedOfferings(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/canvaspop/pull-url") {
+    handleCanvasPopPullUrl(req, res);
     return;
   }
   if (req.method === "GET" && pathname.startsWith("/api/print-assets/")) {

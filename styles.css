@@ -2651,6 +2651,38 @@ body {
   min-height: 400px;
 }
 
+.wallart-modal-card {
+  width: min(920px, calc(100vw - 40px));
+}
+
+.wallart-modal-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(220px, 280px);
+  gap: 16px;
+  align-items: start;
+}
+
+.wallart-preview-wrap {
+  min-height: 360px;
+  border: 1px solid #3f3f3f;
+  border-radius: 10px;
+  background: #121212;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.wallart-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wallart-modal-controls {
+  display: grid;
+  gap: 12px;
+}
+
 .settings-modal-card {
   width: 100vw;
   height: 100vh;
@@ -3197,6 +3229,14 @@ body {
 }
 
 @media (max-width: 960px) {
+  .wallart-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .wallart-preview-wrap {
+    min-height: 220px;
+  }
+
   .settings-modal-card {
     min-height: 0;
     grid-template-columns: 1fr;
