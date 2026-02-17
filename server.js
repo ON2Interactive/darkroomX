@@ -1183,6 +1183,13 @@ async function handleRawPreviewStart(req, res) {
   if (!auth.ok) {
     return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
   }
+  const accessStatus = await getUserAccessStatus(req, auth.user);
+  if (!accessStatus.ok) {
+    return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
+  }
+  if (!accessStatus.subscriptionActive) {
+    return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
+  }
   try {
     const payload = await parseJsonBody(req, 64 * 1024);
     const fileName = sanitizeFileName(String(payload?.fileName || "raw-image"));
@@ -1212,6 +1219,13 @@ async function handleRawPreviewComplete(req, res) {
   const auth = await getAuthenticatedSupabaseUser(req);
   if (!auth.ok) {
     return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
+  }
+  const accessStatus = await getUserAccessStatus(req, auth.user);
+  if (!accessStatus.ok) {
+    return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
+  }
+  if (!accessStatus.subscriptionActive) {
+    return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
   }
   try {
     const payload = await parseJsonBody(req, 64 * 1024);
@@ -1380,6 +1394,13 @@ async function handleRawPreview(req, res) {
   const auth = await getAuthenticatedSupabaseUser(req);
   if (!auth.ok) {
     return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
+  }
+  const accessStatus = await getUserAccessStatus(req, auth.user);
+  if (!accessStatus.ok) {
+    return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
+  }
+  if (!accessStatus.subscriptionActive) {
+    return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
   }
 
   try {

@@ -318,6 +318,8 @@ const state = {
   credits: DEFAULT_CREDITS,
   accessCheckTimer: null,
   trialLocked: false,
+  subscriptionActive: false,
+  trialActive: false,
   cropRect: null,
   cropAspect: "original",
   cropDrag: null,
@@ -952,6 +954,8 @@ const beginStripeBillingPortal = async () => {
 
 const fetchAccessStatus = async () => {
   if (!getAuthToken() && !getRefreshToken()) {
+    state.subscriptionActive = false;
+    state.trialActive = false;
     setTrialLockVisible(true, "Please sign in to continue using DarkroomX.");
     return null;
   }
@@ -967,17 +971,34 @@ const fetchAccessStatus = async () => {
     }
     throw new Error(payload?.error || "Unable to verify account access.");
   }
+  state.subscriptionActive = Boolean(payload?.subscriptionActive);
+  state.trialActive = Boolean(payload?.trialActive);
   return payload;
 };
 
 const applyAccessStatus = (status) => {
-  if (!status || typeof status !== "object") return;
+  if (!status || typeof status !== "object") {
+    state.subscriptionActive = false;
+    state.trialActive = false;
+    return;
+  }
+  state.subscriptionActive = Boolean(status.subscriptionActive);
+  state.trialActive = Boolean(status.trialActive);
   const accessAllowed = Boolean(status.accessAllowed);
   if (accessAllowed) {
     setTrialLockVisible(false);
     return;
   }
   setTrialLockVisible(true, "Your 24-hour free trial has ended. Subscribe to keep editing and generating images.");
+};
+
+const ensureRawUploadsAllowed = async () => {
+  try {
+    const status = await fetchAccessStatus();
+    return Boolean(status?.subscriptionActive);
+  } catch {
+    return false;
+  }
 };
 
 const startAccessStatusPolling = async () => {
@@ -4381,7 +4402,16 @@ const loadImageDimensions = (photo) => {
 
 const handleFolderUpload = async (event) => {
   const sourceInput = event.target;
-  const files = Array.from(event.target.files || []).filter((file) => isAllowedUploadFile(file));
+  const incomingFiles = Array.from(event.target.files || []).filter((file) => isAllowedUploadFile(file));
+  let files = [...incomingFiles];
+  const rawSelectionCount = files.filter((file) => isRawUploadFile(file)).length;
+  if (rawSelectionCount > 0) {
+    const rawAllowed = await ensureRawUploadsAllowed();
+    if (!rawAllowed) {
+      files = files.filter((file) => !isRawUploadFile(file));
+      window.alert("RAW uploads require an active subscription.");
+    }
+  }
   if (files.length === 0) {
     if (sourceInput) sourceInput.value = "";
     return;
