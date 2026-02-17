@@ -1755,7 +1755,7 @@ body {
 }
 
 .tool-btn--bottom {
-  margin-top: 8px;
+  margin-top: auto;
 }
 
 .shape-flyout {
