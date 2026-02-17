@@ -154,7 +154,10 @@ const toneCurveFuncB = document.getElementById("toneCurveFuncB");
 
 const sliderIds = [
   "exposure",
+  "brightness",
   "contrast",
+  "blackPoint",
+  "clarity",
   "saturation",
   "temperature",
   "tint",
@@ -167,7 +170,10 @@ const toolButtons = {
 
 const defaultAdjustments = {
   exposure: 0,
+  brightness: 0,
   contrast: 0,
+  blackPoint: 0,
+  clarity: 0,
   saturation: 0,
   temperature: 0,
   tint: 0,
@@ -1428,13 +1434,17 @@ const applyToneFilterLut = (photo) => {
 };
 
 const buildBaseAdjustmentsFilter = (adjustments) => {
-  const brightness = 100 + adjustments.exposure * 0.45;
-  const contrast = 100 + adjustments.contrast;
+  const exposureBrightness = 100 + adjustments.exposure * 0.45;
+  const brightness = 100 + adjustments.brightness * 0.55;
+  const clarityContrast = adjustments.clarity * 0.22;
+  const contrast = 100 + adjustments.contrast + clarityContrast;
   const saturation = 100 + adjustments.saturation;
   const hueRotate = adjustments.tint * 0.35;
   const sepia = Math.max(0, adjustments.temperature) * 0.35;
+  const blackPointContrast = 100 + adjustments.blackPoint * 0.25;
+  const blackPointBrightness = 100 - adjustments.blackPoint * 0.2;
 
-  return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) hue-rotate(${hueRotate}deg) sepia(${sepia}%)`;
+  return `brightness(${exposureBrightness}%) brightness(${brightness}%) contrast(${contrast}%) contrast(${blackPointContrast}%) brightness(${blackPointBrightness}%) saturate(${saturation}%) hue-rotate(${hueRotate}deg) sepia(${sepia}%)`;
 };
 
 const buildFilmLookFilter = (photo) => {
@@ -1644,10 +1654,38 @@ const applyAdjustmentMath = (r, g, b, photo) => {
   gg += exposureShift;
   bb += exposureShift;
 
+  const brightnessFactor = 1 + adjustments.brightness / 200;
+  rr *= brightnessFactor;
+  gg *= brightnessFactor;
+  bb *= brightnessFactor;
+
   const contrastFactor = 1 + adjustments.contrast / 100;
   rr = (rr - 128) * contrastFactor + 128;
   gg = (gg - 128) * contrastFactor + 128;
   bb = (bb - 128) * contrastFactor + 128;
+
+  const blackPoint = clamp(adjustments.blackPoint, -100, 100) / 100;
+  if (blackPoint > 0) {
+    const crush = 1 + blackPoint * 0.85;
+    rr = Math.pow(clamp(rr, 0, 255) / 255, crush) * 255;
+    gg = Math.pow(clamp(gg, 0, 255) / 255, crush) * 255;
+    bb = Math.pow(clamp(bb, 0, 255) / 255, crush) * 255;
+  } else if (blackPoint < 0) {
+    const lift = Math.abs(blackPoint) * 0.22 * 255;
+    rr = rr + lift * (1 - rr / 255);
+    gg = gg + lift * (1 - gg / 255);
+    bb = bb + lift * (1 - bb / 255);
+  }
+
+  const clarity = clamp(adjustments.clarity, -100, 100) / 100;
+  if (clarity !== 0) {
+    const luma = 0.299 * rr + 0.587 * gg + 0.114 * bb;
+    const midtoneWeight = 1 - Math.min(1, Math.abs(luma - 128) / 128);
+    const clarityAmount = clarity * midtoneWeight * 0.9;
+    rr = luma + (rr - luma) * (1 + clarityAmount);
+    gg = luma + (gg - luma) * (1 + clarityAmount);
+    bb = luma + (bb - luma) * (1 + clarityAmount);
+  }
 
   const satFactor = 1 + adjustments.saturation / 100;
   const gray = 0.299 * rr + 0.587 * gg + 0.114 * bb;
