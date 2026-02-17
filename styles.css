@@ -1679,10 +1679,6 @@ body {
   margin-top: 8px;
 }
 
-.tool-btn--bottom-alt {
-  margin-top: auto;
-}
-
 .shape-flyout {
   position: absolute;
   left: calc(100% + 8px);
