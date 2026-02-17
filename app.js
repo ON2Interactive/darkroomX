@@ -2526,7 +2526,7 @@ const setPrintModalStatus = (message) => {
   printModalStatus.textContent = message || "";
 };
 
-const setRawProcessingState = (busy, message = "Processing RAW file...") => {
+const setRawProcessingState = (busy, message = "Generating Preview...") => {
   if (!rawProcessingOverlay) return;
   rawProcessingOverlay.classList.toggle("hidden-panel", !busy);
   if (rawProcessingStatus) {
@@ -4334,7 +4334,7 @@ const handleFolderUpload = async (event) => {
   const rawFilesPending = files.filter((file) => isRawUploadFile(file)).length;
 
   if (rawFilesPending > 0) {
-    setRawProcessingState(true, rawFilesPending === 1 ? "Processing RAW file..." : `Processing ${rawFilesPending} RAW files...`);
+    setRawProcessingState(true, rawFilesPending === 1 ? "Generating Preview..." : "Generating Previews...");
   }
 
   try {
@@ -4401,10 +4401,6 @@ const handleFolderUpload = async (event) => {
     selectPhoto(0);
   } else {
     renderFilmstrip();
-  }
-
-  if (convertedRawFiles.length > 0) {
-    window.alert(`${convertedRawFiles.length} RAW file(s) were converted to JPEG preview for editing.`);
   }
 
   if (unresolvedRejectedFiles.length > 0) {
