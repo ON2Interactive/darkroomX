@@ -112,6 +112,7 @@ const settingsModal = document.getElementById("settingsModal");
 const settingsModalCloseBtn = document.getElementById("settingsModalCloseBtn");
 const settingsManageSubscriptionBtn = document.getElementById("settingsManageSubscriptionBtn");
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
+const settingsHelpBtn = document.getElementById("settingsHelpBtn");
 const settingsShareBtn = document.getElementById("settingsShareBtn");
 const libraryModal = document.getElementById("libraryModal");
 const libraryModalCloseBtn = document.getElementById("libraryModalCloseBtn");
@@ -121,7 +122,7 @@ const settingsProjectSaveBtn = document.getElementById("settingsProjectSaveBtn")
 const settingsProjectRefreshBtn = document.getElementById("settingsProjectRefreshBtn");
 const settingsProjectsStatus = document.getElementById("settingsProjectsStatus");
 const settingsProjectsList = document.getElementById("settingsProjectsList");
-const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn].filter(Boolean);
+const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn, settingsHelpBtn].filter(Boolean);
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -5322,6 +5323,9 @@ settingsBuyCreditsBtn?.addEventListener("click", async () => {
   } finally {
     settingsBuyCreditsBtn.disabled = false;
   }
+});
+settingsHelpBtn?.addEventListener("click", () => {
+  window.open("/help", "_blank", "noopener,noreferrer");
 });
 settingsShareBtn?.addEventListener("click", () => {
   const subject = encodeURIComponent("Check out DarkroomX");
