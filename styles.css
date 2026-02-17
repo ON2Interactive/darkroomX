@@ -2065,6 +2065,20 @@ body {
   font-weight: 400;
 }
 
+.transform-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px;
+}
+
+.transform-icon-btn i,
+.transform-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
 .rotate-row {
   display: grid;
   gap: 8px;
