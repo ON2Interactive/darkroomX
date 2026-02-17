@@ -198,7 +198,9 @@ function getCanvasPopConfig() {
 }
 
 function getPrintSpaceConfig() {
-  const apiKey = normalizeEnvValue(process.env.PRINTSPACE_API_KEY || "");
+  const apiKey = normalizeEnvValue(
+    process.env.PRINTSPACE_API_KEY || process.env.THEPRINTSPACE_API_KEY || process.env.PRINTSPACE_KEY || "",
+  );
   const accessKey = normalizeEnvValue(process.env.PRINTSPACE_ACCESS_KEY || "");
   const storeBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_STORE_BASE_URL || "").replace(/\/$/, "");
   const pullPathRaw = normalizeEnvValue(process.env.PRINTSPACE_PULL_PATH || "/api/pull");
@@ -3537,7 +3539,7 @@ async function handlePrintSpacePullUrl(req, res) {
   if (!printSpace.apiKey && !(printSpace.accessKey && printSpace.storeBaseUrl)) {
     return sendJson(res, 500, {
       error:
-        "PrintSpace is not configured. Set PRINTSPACE_API_KEY, or set PRINTSPACE_ACCESS_KEY + PRINTSPACE_STORE_BASE_URL for pull-link mode.",
+        "PrintSpace is not configured. Set PRINTSPACE_API_KEY (or THEPRINTSPACE_API_KEY / PRINTSPACE_KEY), or set PRINTSPACE_ACCESS_KEY + PRINTSPACE_STORE_BASE_URL for pull-link mode.",
     });
   }
 
