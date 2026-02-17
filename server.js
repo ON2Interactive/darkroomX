@@ -1916,7 +1916,7 @@ async function getOwnedProject(req, userId, projectId) {
   if (!service.ok) return { ok: false, status: 500, error: service.error };
   const { config, headers } = service;
   const response = await fetch(
-    `${config.url}/rest/v1/projects?select=id,name,status,created_at,last_opened_at,updated_at&id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    `${config.url}/rest/v1/projects?select=id,name,status,cover_image_url,created_at,last_opened_at,updated_at&id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
     {
       method: "GET",
       headers,
@@ -1946,7 +1946,7 @@ async function handleProjectsList(req, res) {
   const userId = String(authResult.user?.id || "").trim();
   const { config, headers } = service;
   const response = await fetch(
-    `${config.url}/rest/v1/projects?select=id,name,status,created_at,last_opened_at,updated_at&user_id=eq.${encodeURIComponent(userId)}&order=last_opened_at.desc.nullslast&order=created_at.desc&limit=200`,
+    `${config.url}/rest/v1/projects?select=id,name,status,cover_image_url,created_at,last_opened_at,updated_at&user_id=eq.${encodeURIComponent(userId)}&order=last_opened_at.desc.nullslast&order=created_at.desc&limit=200`,
     {
       method: "GET",
       headers,
@@ -1962,6 +1962,7 @@ async function handleProjectsList(req, res) {
         id: String(row?.id || ""),
         name: String(row?.name || ""),
         status: String(row?.status || "active"),
+        coverImageUrl: String(row?.cover_image_url || ""),
         createdAt: row?.created_at || null,
         lastOpenedAt: row?.last_opened_at || null,
         updatedAt: row?.updated_at || null,
@@ -2017,6 +2018,7 @@ async function handleProjectsCreate(req, res) {
         id: String(project.id || ""),
         name: String(project.name || name),
         status: String(project.status || "active"),
+        coverImageUrl: String(project.cover_image_url || ""),
         createdAt: project.created_at || null,
         lastOpenedAt: project.last_opened_at || null,
         updatedAt: project.updated_at || null,
@@ -2088,6 +2090,8 @@ async function handleProjectSessionSave(req, res, projectId) {
       return sendJson(res, 400, { error: "Missing session payload." });
     }
     const nextName = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 120);
+    const nextCoverImageUrlRaw = String(payload?.coverImageUrl || "").trim();
+    const nextCoverImageUrl = nextCoverImageUrlRaw.startsWith("data:image/") ? nextCoverImageUrlRaw : "";
 
     const { service } = owned;
     const bucketReady = await ensureProjectSessionsBucket(service);
@@ -2115,6 +2119,7 @@ async function handleProjectSessionSave(req, res, projectId) {
       last_opened_at: new Date().toISOString(),
     };
     if (nextName) updates.name = nextName;
+    if (nextCoverImageUrl) updates.cover_image_url = nextCoverImageUrl;
     const updateResponse = await fetch(
       `${config.url}/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}`,
       {
@@ -2139,6 +2144,7 @@ async function handleProjectSessionSave(req, res, projectId) {
             id: String(project.id || ""),
             name: String(project.name || ""),
             status: String(project.status || "active"),
+            coverImageUrl: String(project.cover_image_url || ""),
             createdAt: project.created_at || null,
             lastOpenedAt: project.last_opened_at || null,
             updatedAt: project.updated_at || null,

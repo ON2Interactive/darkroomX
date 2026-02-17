@@ -74,6 +74,7 @@ const toolCropBtn = document.getElementById("toolCropBtn");
 const toolTextBtn = document.getElementById("toolTextBtn");
 const toolGenerateBtn = document.getElementById("toolGenerateBtn");
 const toolPrintBtn = document.getElementById("toolPrintBtn");
+const toolLibraryBtn = document.getElementById("toolLibraryBtn");
 const toolSettingsBtn = document.getElementById("toolSettingsBtn");
 const toolShapesBtn = document.getElementById("toolShapesBtn");
 const toolEditBtn = document.getElementById("toolEditBtn");
@@ -111,16 +112,16 @@ const settingsModal = document.getElementById("settingsModal");
 const settingsModalCloseBtn = document.getElementById("settingsModalCloseBtn");
 const settingsManageSubscriptionBtn = document.getElementById("settingsManageSubscriptionBtn");
 const settingsBuyCreditsBtn = document.getElementById("settingsBuyCreditsBtn");
-const settingsProjectsBtn = document.getElementById("settingsProjectsBtn");
 const settingsShareBtn = document.getElementById("settingsShareBtn");
-const settingsProjectsPanel = document.getElementById("settingsProjectsPanel");
+const libraryModal = document.getElementById("libraryModal");
+const libraryModalCloseBtn = document.getElementById("libraryModalCloseBtn");
 const settingsProjectNameInput = document.getElementById("settingsProjectNameInput");
 const settingsProjectNewBtn = document.getElementById("settingsProjectNewBtn");
 const settingsProjectSaveBtn = document.getElementById("settingsProjectSaveBtn");
 const settingsProjectRefreshBtn = document.getElementById("settingsProjectRefreshBtn");
 const settingsProjectsStatus = document.getElementById("settingsProjectsStatus");
 const settingsProjectsList = document.getElementById("settingsProjectsList");
-const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn, settingsProjectsBtn].filter(Boolean);
+const settingsLinkButtons = [settingsManageSubscriptionBtn, settingsBuyCreditsBtn].filter(Boolean);
 const trialLockModal = document.getElementById("trialLockModal");
 const trialLockMessage = document.getElementById("trialLockMessage");
 const trialLockSubscribeBtn = document.getElementById("trialLockSubscribeBtn");
@@ -2799,7 +2800,6 @@ const closeCreditsModal = () => {
 const openSettingsModal = () => {
   if (!settingsModal) return;
   settingsModal.classList.remove("hidden-panel");
-  settingsProjectsPanel?.classList.add("hidden-panel");
   hydrateIcons();
   window.requestAnimationFrame(() => {
     settingsLinkButtons[0]?.focus();
@@ -2809,7 +2809,30 @@ const openSettingsModal = () => {
 const closeSettingsModal = () => {
   if (!settingsModal) return;
   settingsModal.classList.add("hidden-panel");
-  settingsProjectsPanel?.classList.add("hidden-panel");
+};
+
+const openLibraryModal = async () => {
+  if (!libraryModal) return;
+  closeSettingsModal();
+  libraryModal.classList.remove("hidden-panel");
+  hydrateIcons();
+  setSettingsProjectsStatus("Loading projects...");
+  try {
+    await refreshProjectsFromCloud();
+    if (!settingsProjectsStatus?.textContent) {
+      setSettingsProjectsStatus("");
+    }
+  } catch (error) {
+    setSettingsProjectsStatus(error?.message || "Unable to load projects.");
+  }
+  window.requestAnimationFrame(() => {
+    settingsProjectNameInput?.focus();
+  });
+};
+
+const closeLibraryModal = () => {
+  if (!libraryModal) return;
+  libraryModal.classList.add("hidden-panel");
 };
 
 const submitPeechoPrintOrder = async () => {
@@ -3212,6 +3235,15 @@ const renderSettingsProjects = (projects = []) => {
   projects.forEach((project) => {
     const item = document.createElement("article");
     item.className = "settings-projects-item";
+    if (state.currentProjectId === project.id) {
+      item.classList.add("is-current");
+    }
+
+    const thumb = document.createElement("div");
+    thumb.className = "settings-projects-thumb";
+    if (project?.coverImageUrl) {
+      thumb.style.backgroundImage = `url('${project.coverImageUrl}')`;
+    }
 
     const head = document.createElement("div");
     head.className = "settings-projects-item-head";
@@ -3219,6 +3251,11 @@ const renderSettingsProjects = (projects = []) => {
     const name = document.createElement("div");
     name.className = "settings-projects-name";
     name.textContent = project.name || "Untitled Session";
+
+    const currentBadge = document.createElement("span");
+    currentBadge.className = "settings-projects-current";
+    currentBadge.textContent = "Current";
+    currentBadge.hidden = state.currentProjectId !== project.id;
 
     const meta = document.createElement("div");
     meta.className = "settings-projects-meta";
@@ -3229,7 +3266,7 @@ const renderSettingsProjects = (projects = []) => {
     openBtn.type = "button";
     openBtn.className = "settings-projects-open";
     openBtn.textContent = state.currentProjectId === project.id ? "Open (Current)" : "Open";
-    openBtn.addEventListener("click", async () => {
+    const openProject = async () => {
       openBtn.disabled = true;
       try {
         const token = getAuthToken();
@@ -3253,7 +3290,12 @@ const renderSettingsProjects = (projects = []) => {
         const session = payload?.session;
         if (session && typeof session === "object") {
           await restoreProjectFromPayload(session);
+          const nextCoverImageUrl = getProjectCoverFromSession(session);
           persistCurrentProjectMeta({ id: project.id, name: project.name || "" });
+          if (nextCoverImageUrl) {
+            project.coverImageUrl = nextCoverImageUrl;
+            thumb.style.backgroundImage = `url('${nextCoverImageUrl}')`;
+          }
           setSettingsProjectsStatus(`Opened ${project.name || "project"}.`);
           await refreshProjectsFromCloud();
           return;
@@ -3274,9 +3316,17 @@ const renderSettingsProjects = (projects = []) => {
       } finally {
         openBtn.disabled = false;
       }
+    };
+
+    openBtn.addEventListener("click", openProject);
+    item.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("button")) return;
+      void openProject();
     });
 
+    item.appendChild(thumb);
     head.appendChild(name);
+    head.appendChild(currentBadge);
     head.appendChild(openBtn);
     item.appendChild(head);
     item.appendChild(meta);
@@ -3305,6 +3355,13 @@ const refreshProjectsFromCloud = async () => {
   if (!state.currentProjectId && projects[0]) {
     persistCurrentProjectMeta({ id: projects[0].id, name: projects[0].name || "" });
   }
+};
+
+const getProjectCoverFromSession = (session) => {
+  if (!session || typeof session !== "object") return "";
+  const photos = Array.isArray(session.photos) ? session.photos : [];
+  const firstWithImage = photos.find((photo) => typeof photo?.imageDataUrl === "string" && photo.imageDataUrl.startsWith("data:image/"));
+  return firstWithImage?.imageDataUrl || "";
 };
 
 const ensureProjectForSave = async ({ silent = false } = {}) => {
@@ -3343,8 +3400,10 @@ const saveCurrentSessionToCloudProject = async () => {
   const ensured = await ensureProjectForSave();
   if (!ensured?.id) return;
   const payload = await getSerializedProjectPayload();
+  const coverImageUrl = getProjectCoverFromSession(payload);
   const requestBody = JSON.stringify({
     name: sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "") || ensured.name,
+    coverImageUrl,
     session: payload,
   });
   if (new Blob([requestBody]).size > CLOUD_SESSION_REQUEST_SOFT_LIMIT_BYTES) {
@@ -3398,8 +3457,10 @@ const runCloudAutosave = async () => {
 
     const ensured = await ensureProjectForSave({ silent: true });
     if (!ensured?.id) return;
+    const coverImageUrl = getProjectCoverFromSession(payload);
     const requestBody = JSON.stringify({
       name: sanitizeProjectName(settingsProjectNameInput?.value || ensured.name || "") || ensured.name,
+      coverImageUrl,
       session: payload,
     });
     if (new Blob([requestBody]).size > CLOUD_SESSION_REQUEST_SOFT_LIMIT_BYTES) return;
@@ -5072,7 +5133,11 @@ document.addEventListener("pointerdown", (event) => {
 toolPrintBtn.addEventListener("click", () => {
   window.print();
 });
+toolLibraryBtn?.addEventListener("click", () => {
+  void openLibraryModal();
+});
 toolSettingsBtn?.addEventListener("click", () => {
+  closeLibraryModal();
   openSettingsModal();
 });
 
@@ -5258,20 +5323,6 @@ settingsBuyCreditsBtn?.addEventListener("click", async () => {
     settingsBuyCreditsBtn.disabled = false;
   }
 });
-settingsProjectsBtn?.addEventListener("click", async () => {
-  const isHidden = settingsProjectsPanel?.classList.contains("hidden-panel");
-  settingsProjectsPanel?.classList.toggle("hidden-panel", !isHidden);
-  if (!isHidden) return;
-  setSettingsProjectsStatus("Loading projects...");
-  try {
-    await refreshProjectsFromCloud();
-    if (!settingsProjectsStatus?.textContent) {
-      setSettingsProjectsStatus("");
-    }
-  } catch (error) {
-    setSettingsProjectsStatus(error?.message || "Unable to load projects.");
-  }
-});
 settingsShareBtn?.addEventListener("click", () => {
   const subject = encodeURIComponent("Check out DarkroomX");
   const body = encodeURIComponent("Check out DarkroomX: https://www.darkroomx.com");
@@ -5332,6 +5383,19 @@ settingsModal?.addEventListener("keydown", (event) => {
         ? (currentIndex + 1) % settingsLinkButtons.length
         : (currentIndex - 1 + settingsLinkButtons.length) % settingsLinkButtons.length;
     settingsLinkButtons[nextIndex]?.focus();
+  }
+});
+libraryModalCloseBtn?.addEventListener("click", closeLibraryModal);
+libraryModal?.addEventListener("pointerdown", (event) => {
+  if (event.target === libraryModal) {
+    closeLibraryModal();
+  }
+});
+libraryModal?.addEventListener("keydown", (event) => {
+  if (libraryModal.classList.contains("hidden-panel")) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeLibraryModal();
   }
 });
 

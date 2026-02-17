@@ -121,6 +121,9 @@
           <button id="toolPrintBtn" type="button" class="tool-btn" aria-label="Print" title="Print">
             <i data-lucide="printer"></i>
           </button>
+          <button id="toolLibraryBtn" type="button" class="tool-btn tool-btn--bottom-alt" aria-label="Library" title="Library">
+            <i data-lucide="library"></i>
+          </button>
           <div id="shapeFlyout" class="shape-flyout hidden-panel" aria-label="Shape Types">
             <button type="button" class="shape-option-btn" data-shape-type="rectangle" title="Rectangle">
               <i data-lucide="square"></i>
@@ -623,22 +626,39 @@
           <div class="settings-modal-links" role="navigation" aria-label="Settings options">
             <button id="settingsManageSubscriptionBtn" class="settings-modal-link" type="button">Manage</button>
             <button id="settingsBuyCreditsBtn" class="settings-modal-link" type="button">Credits</button>
-            <button id="settingsProjectsBtn" class="settings-modal-link" type="button">Projects</button>
           </div>
-          <section id="settingsProjectsPanel" class="settings-projects-panel hidden-panel" aria-label="Project Sessions">
-            <label class="settings-projects-label" for="settingsProjectNameInput">Project Name</label>
-            <input id="settingsProjectNameInput" class="settings-projects-input" type="text" maxlength="120" placeholder="Session name" />
-            <div class="settings-projects-actions">
-              <button id="settingsProjectNewBtn" class="settings-projects-action" type="button">New</button>
-              <button id="settingsProjectSaveBtn" class="settings-projects-action" type="button">Save</button>
-              <button id="settingsProjectRefreshBtn" class="settings-projects-action" type="button">Refresh</button>
+          <button id="settingsShareBtn" class="settings-modal-share" type="button" aria-label="Share DarkroomX" title="Share DarkroomX">
+            <i data-lucide="share-2"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="libraryModal" class="modal-backdrop library-modal-backdrop hidden-panel" role="dialog" aria-modal="true" aria-label="Project Library">
+      <div class="modal-card library-modal-card">
+        <div class="library-modal-content">
+          <button id="libraryModalCloseBtn" class="icon-btn settings-modal-close" type="button" aria-label="Close Project Library">
+            <i data-lucide="x"></i>
+          </button>
+          <img src="/assets/darkroomx-logo-white.svg" alt="DarkroomX" class="settings-modal-logo" />
+          <section id="settingsProjectsPanel" class="settings-projects-panel library-projects-panel" aria-label="Project Sessions">
+            <div class="settings-projects-topbar">
+              <input id="settingsProjectNameInput" class="settings-projects-input settings-projects-input-minimal" type="text" maxlength="120" placeholder="Project name" />
+              <div class="settings-projects-actions settings-projects-actions-minimal">
+                <button id="settingsProjectSaveBtn" class="settings-projects-action settings-projects-action-icon" type="button" aria-label="Save Project" title="Save Project">
+                  <i data-lucide="save"></i>
+                </button>
+                <button id="settingsProjectNewBtn" class="settings-projects-action settings-projects-action-icon" type="button" aria-label="New Project" title="New Project">
+                  <i data-lucide="plus"></i>
+                </button>
+                <button id="settingsProjectRefreshBtn" class="settings-projects-action settings-projects-action-icon hidden-panel" type="button" aria-label="Refresh Projects" title="Refresh Projects">
+                  <i data-lucide="refresh-cw"></i>
+                </button>
+              </div>
             </div>
             <p id="settingsProjectsStatus" class="settings-projects-status"></p>
             <div id="settingsProjectsList" class="settings-projects-list" role="list"></div>
           </section>
-          <button id="settingsShareBtn" class="settings-modal-share" type="button" aria-label="Share DarkroomX" title="Share DarkroomX">
-            <i data-lucide="share-2"></i>
-          </button>
         </div>
       </div>
     </div>

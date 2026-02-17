@@ -43,6 +43,12 @@
       </header>
 
       <section class="landing-hero" role="img" aria-label="DarkroomX hero image">
+        <div class="landing-hero-slides" id="landingHeroSlides" aria-hidden="true">
+          <img class="landing-hero-slide is-active" src="/assets/hero-image-01.png" alt="" loading="eager" decoding="async" />
+          <img class="landing-hero-slide" src="/assets/slideshow/02.jpeg" alt="" loading="lazy" decoding="async" />
+          <img class="landing-hero-slide" src="/assets/slideshow/07.jpeg" alt="" loading="lazy" decoding="async" />
+          <img class="landing-hero-slide" src="/assets/slideshow/08.jpeg" alt="" loading="lazy" decoding="async" />
+        </div>
         <div class="landing-overlay"></div>
         <div class="landing-hero-copy">
           <h1>Upload. Edit. Generate. ReImagine.</h1>
@@ -298,6 +304,27 @@
           footerYear.textContent = String(new Date().getFullYear());
         }
 
+        const heroSlidesWrap = document.getElementById("landingHeroSlides");
+        const heroSlideEls = heroSlidesWrap ? Array.from(heroSlidesWrap.querySelectorAll(".landing-hero-slide")) : [];
+        let activeHeroSlide = 0;
+        let heroSlideTimer = null;
+
+        const setActiveHeroSlide = (index) => {
+          if (!heroSlideEls.length) return;
+          activeHeroSlide = (index + heroSlideEls.length) % heroSlideEls.length;
+          heroSlideEls.forEach((slide, i) => {
+            slide.classList.toggle("is-active", i === activeHeroSlide);
+          });
+        };
+
+        const startHeroSlideshow = () => {
+          if (heroSlideEls.length <= 1) return;
+          if (heroSlideTimer) window.clearInterval(heroSlideTimer);
+          heroSlideTimer = window.setInterval(() => {
+            setActiveHeroSlide(activeHeroSlide + 1);
+          }, 5200);
+        };
+
         const slideshowTrack = document.getElementById("landingPricingSlideshowTrack");
         const slideEls = slideshowTrack ? Array.from(slideshowTrack.querySelectorAll(".pricing-slide")) : [];
         const dotWrap = document.getElementById("landingPricingSlideshowDots");
@@ -324,6 +351,7 @@
           }, 4200);
         };
 
+        startHeroSlideshow();
         startSlideShow();
       })();
     </script>
