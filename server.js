@@ -1854,8 +1854,9 @@ async function ensureProjectSessionsBucket(service) {
     headers,
   });
   if (checkResponse.ok) return { ok: true };
-  if (checkResponse.status !== 404) {
-    const reason = await checkResponse.text().catch(() => "");
+  const reason = await checkResponse.text().catch(() => "");
+  const bucketMissing = checkResponse.status === 404 || String(reason || "").toLowerCase().includes("bucket not found");
+  if (!bucketMissing) {
     return { ok: false, status: 502, error: `Unable to check project bucket.${reason ? ` ${reason}` : ""}` };
   }
 
@@ -2007,6 +2008,10 @@ async function handleProjectSessionLoad(req, res, projectId) {
   }
 
   const { service, project } = owned;
+  const bucketReady = await ensureProjectSessionsBucket(service);
+  if (!bucketReady.ok) {
+    return sendJson(res, bucketReady.status || 500, { error: bucketReady.error || "Unable to prepare project bucket." });
+  }
   const { config, headers } = service;
   const objectPath = buildProjectSessionObjectPath(userId, projectId);
   const response = await fetch(`${config.url}/storage/v1/object/${PROJECT_SESSIONS_BUCKET}/${objectPath}`, {
@@ -2019,6 +2024,9 @@ async function handleProjectSessionLoad(req, res, projectId) {
   }
   if (!response.ok) {
     const reason = await response.text().catch(() => "");
+    if (String(reason || "").toLowerCase().includes("bucket not found")) {
+      return sendJson(res, 200, { project, session: null });
+    }
     return sendJson(res, 502, { error: `Unable to load project session.${reason ? ` ${reason}` : ""}` });
   }
 
