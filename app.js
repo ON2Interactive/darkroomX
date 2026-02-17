@@ -320,6 +320,7 @@ const state = {
   trialLocked: false,
   subscriptionActive: false,
   trialActive: false,
+  accessBypassed: false,
   cropRect: null,
   cropAspect: "original",
   cropDrag: null,
@@ -956,6 +957,7 @@ const fetchAccessStatus = async () => {
   if (!getAuthToken() && !getRefreshToken()) {
     state.subscriptionActive = false;
     state.trialActive = false;
+    state.accessBypassed = false;
     setTrialLockVisible(true, "Please sign in to continue using DarkroomX.");
     return null;
   }
@@ -973,6 +975,7 @@ const fetchAccessStatus = async () => {
   }
   state.subscriptionActive = Boolean(payload?.subscriptionActive);
   state.trialActive = Boolean(payload?.trialActive);
+  state.accessBypassed = Boolean(payload?.bypassed);
   return payload;
 };
 
@@ -980,10 +983,12 @@ const applyAccessStatus = (status) => {
   if (!status || typeof status !== "object") {
     state.subscriptionActive = false;
     state.trialActive = false;
+    state.accessBypassed = false;
     return;
   }
   state.subscriptionActive = Boolean(status.subscriptionActive);
   state.trialActive = Boolean(status.trialActive);
+  state.accessBypassed = Boolean(status.bypassed);
   const accessAllowed = Boolean(status.accessAllowed);
   if (accessAllowed) {
     setTrialLockVisible(false);
@@ -995,7 +1000,7 @@ const applyAccessStatus = (status) => {
 const ensureRawUploadsAllowed = async () => {
   try {
     const status = await fetchAccessStatus();
-    return Boolean(status?.subscriptionActive);
+    return Boolean(status?.subscriptionActive || status?.bypassed);
   } catch {
     return false;
   }

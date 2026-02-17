@@ -1187,7 +1187,7 @@ async function handleRawPreviewStart(req, res) {
   if (!accessStatus.ok) {
     return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
   }
-  if (!accessStatus.subscriptionActive) {
+  if (!accessStatus.subscriptionActive && !accessStatus.bypassed) {
     return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
   }
   try {
@@ -1224,7 +1224,7 @@ async function handleRawPreviewComplete(req, res) {
   if (!accessStatus.ok) {
     return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
   }
-  if (!accessStatus.subscriptionActive) {
+  if (!accessStatus.subscriptionActive && !accessStatus.bypassed) {
     return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
   }
   try {
@@ -1399,7 +1399,7 @@ async function handleRawPreview(req, res) {
   if (!accessStatus.ok) {
     return sendJson(res, accessStatus.status || 502, { error: accessStatus.error || "Unable to verify access." });
   }
-  if (!accessStatus.subscriptionActive) {
+  if (!accessStatus.subscriptionActive && !accessStatus.bypassed) {
     return sendJson(res, 403, { error: "RAW uploads require an active subscription." });
   }
 
@@ -2499,6 +2499,7 @@ async function handleAccessStatus(req, res) {
   return sendJson(res, 200, {
     ok: true,
     enforced: accessStatus.enforced,
+    bypassed: Boolean(accessStatus.bypassed),
     subscriptionActive: accessStatus.subscriptionActive,
     trialActive: accessStatus.trialActive,
     accessAllowed: accessStatus.accessAllowed,
