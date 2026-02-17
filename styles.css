@@ -3013,6 +3013,20 @@ body {
   padding: 40px 0 24px;
 }
 
+.library-modal-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.library-modal-close:hover {
+  color: rgba(255, 255, 255, 0.62);
+}
+
 .library-projects-panel {
   width: 100%;
   margin-top: 0;
