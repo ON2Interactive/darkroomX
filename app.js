@@ -216,7 +216,7 @@ const APP_SESSION_STARTED_AT_STORAGE_KEY = "darkroomx_app_session_started_at";
 const SESSION_RECOVERY_STORAGE_KEY = "darkroomx_session_recovery";
 const PROJECT_META_STORAGE_KEY = "darkroomx_active_project";
 const APP_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
-const CLOUD_AUTOSAVE_INTERVAL_MS = 60 * 1000;
+const CLOUD_AUTOSAVE_INTERVAL_MS = 15 * 1000;
 const APP_SESSION_EXPIRED_MESSAGE = "Your 24-hour app session ended. Please sign in again to continue.";
 const RAW_FILE_EXTENSIONS = new Set(["dng", "cr2", "cr3", "nef", "arw", "rw2", "orf", "raf", "pef", "srw", "x3f"]);
 const CREDIT_COSTS = {
@@ -3000,6 +3000,37 @@ const restoreRecoveredSessionIfAvailable = async () => {
   }
 };
 
+const restoreLastActiveProjectOnStartup = async () => {
+  try {
+    if (state.photos.length > 0) return false;
+    const projectId = String(state.currentProjectId || "").trim();
+    if (!projectId) return false;
+    if (!getAuthToken() && !getRefreshToken()) return false;
+
+    const response = await authFetch(`/api/projects/${encodeURIComponent(projectId)}/session`, {
+      method: "GET",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) return false;
+      return false;
+    }
+
+    const session = payload?.session;
+    if (!session || typeof session !== "object") return false;
+    await restoreProjectFromPayload(session);
+    const project = payload?.project || {};
+    persistCurrentProjectMeta({
+      id: project.id || projectId,
+      name: project.name || state.currentProjectName || "",
+    });
+    setSettingsProjectsStatus(`Restored ${project.name || "last session"}.`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const handleProjectLoad = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -5480,8 +5511,14 @@ ensureAppSessionStartedAt();
 hydrateIcons();
 startAccessStatusPolling();
 startCloudAutosave();
-void restoreRecoveredSessionIfAvailable();
+void (async () => {
+  const restoredFromCloud = await restoreLastActiveProjectOnStartup();
+  if (!restoredFromCloud) {
+    await restoreRecoveredSessionIfAvailable();
+  }
+})();
 
 window.addEventListener("beforeunload", () => {
   void runCloudAutosave();
+  void persistSessionRecoverySnapshot();
 });
