@@ -111,6 +111,7 @@ const wallartProduct = document.getElementById("wallartProduct");
 const wallartMeta = document.getElementById("wallartMeta");
 const wallartStatus = document.getElementById("wallartStatus");
 const wallartCancelBtn = document.getElementById("wallartCancelBtn");
+const wallartPrintspaceBtn = document.getElementById("wallartPrintspaceBtn");
 const wallartContinueBtn = document.getElementById("wallartContinueBtn");
 const creditsModal = document.getElementById("creditsModal");
 const creditsModalTitle = document.getElementById("creditsModalTitle");
@@ -2981,6 +2982,44 @@ const beginCanvasPopWallartOrder = async () => {
   window.open(checkoutUrl, "_blank", "noopener");
 };
 
+const beginPrintSpaceWallartOrder = async () => {
+  if (!getAuthToken() && !getRefreshToken()) {
+    window.location.href = "/signup";
+    return;
+  }
+
+  const photo = getSelectedPhoto();
+  if (!photo) {
+    window.alert("Select a photo first.");
+    return;
+  }
+
+  const imageDataUrl = await buildSelectedPhotoWallartDataUrl();
+  const response = await authFetch("/api/printspace/pull-url", {
+    method: "POST",
+    headers: getJsonRequestHeaders(),
+    body: JSON.stringify({
+      imageDataUrl,
+      fileName: buildExportFilename(photo.file?.name || "wallart").replace(/\.png$/i, ".jpg"),
+      productType: String(wallartProduct?.value || "framed_print"),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      handleExpiredAuthSession(payload?.error || "Invalid or expired auth session.");
+      return;
+    }
+    throw new Error(payload?.error || "Unable to start PrintSpace checkout.");
+  }
+
+  const checkoutUrl = String(payload?.checkoutUrl || "").trim();
+  if (!checkoutUrl) {
+    throw new Error("Missing PrintSpace checkout URL.");
+  }
+  window.open(checkoutUrl, "_blank", "noopener");
+};
+
 const openWallartModal = async () => {
   const photo = getSelectedPhoto();
   if (!photo) return;
@@ -5417,6 +5456,9 @@ wallartModalCloseBtn?.addEventListener("click", closeWallartModal);
 wallartCancelBtn?.addEventListener("click", closeWallartModal);
 wallartContinueBtn?.addEventListener("click", async () => {
   wallartContinueBtn.disabled = true;
+  if (wallartPrintspaceBtn) {
+    wallartPrintspaceBtn.disabled = true;
+  }
   if (wallartStatus) {
     wallartStatus.textContent = "Opening checkout...";
   }
@@ -5429,6 +5471,31 @@ wallartContinueBtn?.addEventListener("click", async () => {
     }
   } finally {
     wallartContinueBtn.disabled = false;
+    if (wallartPrintspaceBtn) {
+      wallartPrintspaceBtn.disabled = false;
+    }
+  }
+});
+wallartPrintspaceBtn?.addEventListener("click", async () => {
+  wallartPrintspaceBtn.disabled = true;
+  if (wallartContinueBtn) {
+    wallartContinueBtn.disabled = true;
+  }
+  if (wallartStatus) {
+    wallartStatus.textContent = "Opening PrintSpace checkout...";
+  }
+  try {
+    await beginPrintSpaceWallartOrder();
+  } catch (error) {
+    window.alert(error?.message || "Unable to start PrintSpace checkout.");
+    if (wallartStatus) {
+      wallartStatus.textContent = "Unable to open PrintSpace checkout. Please try again.";
+    }
+  } finally {
+    wallartPrintspaceBtn.disabled = false;
+    if (wallartContinueBtn) {
+      wallartContinueBtn.disabled = false;
+    }
   }
 });
 wallartModal?.addEventListener("pointerdown", (event) => {
