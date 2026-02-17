@@ -1170,12 +1170,17 @@ async function handleRawPreview(req, res) {
       return sendJson(res, 400, { error: "Unsupported RAW filename." });
     }
 
-    const body = await parseBinaryBody(req, 80 * 1024 * 1024);
+    const rawMaxBytesFromEnv = Number(process.env.RAW_UPLOAD_MAX_BYTES || "");
+    const rawMaxBytes = Number.isFinite(rawMaxBytesFromEnv) && rawMaxBytesFromEnv > 0
+      ? Math.floor(rawMaxBytesFromEnv)
+      : 200 * 1024 * 1024;
+    const body = await parseBinaryBody(req, rawMaxBytes);
     if (!body || body.length === 0) {
       return sendJson(res, 400, { error: "Missing RAW payload." });
     }
 
     const cloudConvertConfig = getCloudConvertConfig();
+    let cloudConvertError = "";
     if (cloudConvertConfig.apiKey) {
       const converted = await cloudConvertConvertRawToImage(body, fileName, cloudConvertConfig);
       if (converted.ok && converted.buffer?.length) {
@@ -1188,11 +1193,15 @@ async function handleRawPreview(req, res) {
           dataUrl,
         });
       }
+      cloudConvertError = String(converted?.error || "").trim();
     }
 
     const jpegPreview = extractLargestEmbeddedJpeg(body) || extractJpegFromTiffPreview(body);
     if (!jpegPreview || jpegPreview.length < 1024) {
-      return sendJson(res, 415, { error: "Could not extract preview image from RAW file." });
+      const errorMessage = cloudConvertError
+        ? `Could not extract preview image from RAW file. CloudConvert: ${cloudConvertError}`
+        : "Could not extract preview image from RAW file.";
+      return sendJson(res, 415, { error: errorMessage });
     }
 
     const dataUrl = `data:image/jpeg;base64,${jpegPreview.toString("base64")}`;

@@ -3897,14 +3897,27 @@ const handleFolderUpload = async (event) => {
   const importFiles = [...decodableFiles, ...convertedRawFiles];
 
   if (importFiles.length === 0) {
+    const messageParts = [];
+    if (rawConversionErrors.length > 0) {
+      messageParts.push(
+        "RAW conversion failed:\n" +
+          rawConversionErrors
+            .slice(0, 5)
+            .map((msg) => `- ${msg}`)
+            .join("\n"),
+      );
+    }
     if (unresolvedRejectedFiles.length > 0) {
-      window.alert(
-        "These files could not be opened.\n\n" +
+      messageParts.push(
+        "These files could not be opened:\n" +
           unresolvedRejectedFiles
             .slice(0, 5)
             .map((file) => `- ${file.name}`)
             .join("\n"),
       );
+    }
+    if (messageParts.length > 0) {
+      window.alert(messageParts.join("\n\n"));
     }
     if (sourceInput) sourceInput.value = "";
     return;
