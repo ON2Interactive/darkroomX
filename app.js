@@ -10,6 +10,11 @@ const layersPanelList = document.getElementById("layersPanelList");
 const mainPreview = document.getElementById("mainPreview");
 const previewWrap = document.getElementById("previewWrap");
 const overlayLayer = document.getElementById("overlayLayer");
+const cropOverlay = document.getElementById("cropOverlay");
+const cropBox = document.getElementById("cropBox");
+const cropAspectSelect = document.getElementById("cropAspectSelect");
+const cropApplyBtn = document.getElementById("cropApplyBtn");
+const cropCancelBtn = document.getElementById("cropCancelBtn");
 const emptyState = document.getElementById("emptyState");
 const emptyUploadPhotosBtn = document.getElementById("emptyUploadPhotosBtn");
 const emptyUploadFolderBtn = document.getElementById("emptyUploadFolderBtn");
@@ -58,6 +63,7 @@ const filmLookResetBtn = document.getElementById("filmLookResetBtn");
 
 const toolSelectBtn = document.getElementById("toolSelectBtn");
 const toolUploadBtn = document.getElementById("toolUploadBtn");
+const toolCropBtn = document.getElementById("toolCropBtn");
 const toolTextBtn = document.getElementById("toolTextBtn");
 const toolGenerateBtn = document.getElementById("toolGenerateBtn");
 const toolPrintBtn = document.getElementById("toolPrintBtn");
@@ -165,6 +171,7 @@ const sliderIds = [
 
 const toolButtons = {
   select: toolSelectBtn,
+  crop: toolCropBtn,
   text: toolTextBtn,
 };
 
@@ -214,6 +221,13 @@ const CREDIT_COSTS = {
   generate: 1,
   edit: 1,
 };
+const CROP_ASPECT_MAP = {
+  "1:1": 1,
+  "4:5": 4 / 5,
+  "3:2": 3 / 2,
+  "16:9": 16 / 9,
+};
+const MIN_CROP_SIZE_PX = 40;
 const toneDragState = {
   levelsHandle: null,
   curvesHandleIndex: null,
@@ -288,6 +302,9 @@ const state = {
   credits: DEFAULT_CREDITS,
   accessCheckTimer: null,
   trialLocked: false,
+  cropRect: null,
+  cropAspect: "free",
+  cropDrag: null,
   currentProjectId: null,
   currentProjectName: "",
   projectsLoaded: false,
@@ -295,6 +312,10 @@ const state = {
   autosaveInFlight: false,
   lastAutosaveDigest: "",
 };
+
+if (cropAspectSelect?.value) {
+  state.cropAspect = String(cropAspectSelect.value || "free");
+}
 
 const hydrateIcons = () => {
   if (window.lucide && typeof window.lucide.createIcons === "function") {
@@ -1221,6 +1242,247 @@ const applyPreviewTransform = () => {
   mainPreview.style.transform = `rotate(${photo.rotation}deg) scale(${state.zoom})`;
 };
 
+const getCropAspectRatio = () => {
+  if (state.cropAspect === "free") return null;
+  return CROP_ASPECT_MAP[state.cropAspect] || null;
+};
+
+const getImageBoundsInPreview = () => {
+  if (!previewWrap || !mainPreview) return null;
+  const wrapRect = previewWrap.getBoundingClientRect();
+  const imageRect = mainPreview.getBoundingClientRect();
+  if (!imageRect.width || !imageRect.height) return null;
+  return {
+    x: imageRect.left - wrapRect.left + previewWrap.scrollLeft,
+    y: imageRect.top - wrapRect.top + previewWrap.scrollTop,
+    width: imageRect.width,
+    height: imageRect.height,
+  };
+};
+
+const clampCropRectToBounds = (rect, bounds) => {
+  const width = clamp(rect.width, MIN_CROP_SIZE_PX, bounds.width);
+  const height = clamp(rect.height, MIN_CROP_SIZE_PX, bounds.height);
+  const x = clamp(rect.x, bounds.x, bounds.x + bounds.width - width);
+  const y = clamp(rect.y, bounds.y, bounds.y + bounds.height - height);
+  return { x, y, width, height };
+};
+
+const fitCropRectToAspect = (rect, bounds, aspect) => {
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 0) {
+    return clampCropRectToBounds(rect, bounds);
+  }
+
+  let width = rect.width;
+  let height = rect.height;
+  if (width / height > aspect) {
+    width = height * aspect;
+  } else {
+    height = width / aspect;
+  }
+  width = clamp(width, MIN_CROP_SIZE_PX, bounds.width);
+  height = clamp(height, MIN_CROP_SIZE_PX, bounds.height);
+  if (width / height > aspect) width = height * aspect;
+  else height = width / aspect;
+
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  return clampCropRectToBounds(
+    {
+      x: centerX - width / 2,
+      y: centerY - height / 2,
+      width,
+      height,
+    },
+    bounds,
+  );
+};
+
+const renderCropOverlay = () => {
+  if (!cropOverlay || !cropBox) return;
+  const active = state.activeTool === "crop" && Boolean(getSelectedPhoto()) && Boolean(state.cropRect);
+  cropOverlay.classList.toggle("hidden-panel", !active);
+  cropOverlay.setAttribute("aria-hidden", active ? "false" : "true");
+  if (!active) return;
+
+  const bounds = getImageBoundsInPreview();
+  if (!bounds) return;
+  state.cropRect = clampCropRectToBounds(state.cropRect, bounds);
+
+  cropBox.style.left = `${state.cropRect.x}px`;
+  cropBox.style.top = `${state.cropRect.y}px`;
+  cropBox.style.width = `${state.cropRect.width}px`;
+  cropBox.style.height = `${state.cropRect.height}px`;
+};
+
+const initializeCropRect = () => {
+  const bounds = getImageBoundsInPreview();
+  if (!bounds) {
+    state.cropRect = null;
+    return;
+  }
+  const aspect = getCropAspectRatio();
+  let width = bounds.width * 0.8;
+  let height = bounds.height * 0.8;
+  if (aspect) {
+    if (width / height > aspect) width = height * aspect;
+    else height = width / aspect;
+  }
+  state.cropRect = {
+    x: bounds.x + (bounds.width - width) / 2,
+    y: bounds.y + (bounds.height - height) / 2,
+    width,
+    height,
+  };
+};
+
+const clearCropState = () => {
+  state.cropDrag = null;
+  state.cropRect = null;
+  if (cropOverlay) {
+    cropOverlay.classList.add("hidden-panel");
+    cropOverlay.setAttribute("aria-hidden", "true");
+  }
+};
+
+const updateCropRectFromPointer = (event) => {
+  if (!state.cropDrag) return;
+  const bounds = getImageBoundsInPreview();
+  if (!bounds) return;
+  const { startRect, startX, startY, mode } = state.cropDrag;
+  const dx = event.clientX - startX;
+  const dy = event.clientY - startY;
+  const aspect = getCropAspectRatio();
+
+  if (mode === "move") {
+    state.cropRect = clampCropRectToBounds(
+      {
+        x: startRect.x + dx,
+        y: startRect.y + dy,
+        width: startRect.width,
+        height: startRect.height,
+      },
+      bounds,
+    );
+    renderCropOverlay();
+    return;
+  }
+
+  const handle = mode;
+  if (aspect) {
+    const anchorX = handle.includes("w") ? startRect.x + startRect.width : startRect.x;
+    const anchorY = handle.includes("n") ? startRect.y + startRect.height : startRect.y;
+    const pointX = clamp(startX + dx, bounds.x, bounds.x + bounds.width);
+    const pointY = clamp(startY + dy, bounds.y, bounds.y + bounds.height);
+    const rawWidth = Math.max(MIN_CROP_SIZE_PX, Math.abs(pointX - anchorX));
+    const rawHeight = Math.max(MIN_CROP_SIZE_PX, Math.abs(pointY - anchorY));
+    let width = rawWidth;
+    let height = rawHeight;
+    if (width / height > aspect) {
+      height = width / aspect;
+    } else {
+      width = height * aspect;
+    }
+    width = Math.min(width, bounds.width);
+    height = Math.min(height, bounds.height);
+
+    const left = handle.includes("w") ? anchorX - width : anchorX;
+    const top = handle.includes("n") ? anchorY - height : anchorY;
+    state.cropRect = clampCropRectToBounds({ x: left, y: top, width, height }, bounds);
+    renderCropOverlay();
+    return;
+  }
+
+  let nextRect = { ...startRect };
+  if (handle.includes("w")) {
+    const nextLeft = clamp(startRect.x + dx, bounds.x, startRect.x + startRect.width - MIN_CROP_SIZE_PX);
+    nextRect.width = startRect.x + startRect.width - nextLeft;
+    nextRect.x = nextLeft;
+  }
+  if (handle.includes("e")) {
+    const nextRight = clamp(
+      startRect.x + startRect.width + dx,
+      startRect.x + MIN_CROP_SIZE_PX,
+      bounds.x + bounds.width,
+    );
+    nextRect.width = nextRight - startRect.x;
+  }
+  if (handle.includes("n")) {
+    const nextTop = clamp(startRect.y + dy, bounds.y, startRect.y + startRect.height - MIN_CROP_SIZE_PX);
+    nextRect.height = startRect.y + startRect.height - nextTop;
+    nextRect.y = nextTop;
+  }
+  if (handle.includes("s")) {
+    const nextBottom = clamp(
+      startRect.y + startRect.height + dy,
+      startRect.y + MIN_CROP_SIZE_PX,
+      bounds.y + bounds.height,
+    );
+    nextRect.height = nextBottom - startRect.y;
+  }
+
+  state.cropRect = clampCropRectToBounds(nextRect, bounds);
+  renderCropOverlay();
+};
+
+const applyCropToSelectedPhoto = async () => {
+  const photo = getSelectedPhoto();
+  if (!photo || !photo.imgEl || !state.cropRect) return;
+  if (photo.rotation !== 0) {
+    window.alert("Reset rotation before cropping for now.");
+    return;
+  }
+
+  const bounds = getImageBoundsInPreview();
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+  const crop = clampCropRectToBounds(state.cropRect, bounds);
+
+  const sx = Math.round(((crop.x - bounds.x) / bounds.width) * photo.imgEl.naturalWidth);
+  const sy = Math.round(((crop.y - bounds.y) / bounds.height) * photo.imgEl.naturalHeight);
+  const sw = Math.round((crop.width / bounds.width) * photo.imgEl.naturalWidth);
+  const sh = Math.round((crop.height / bounds.height) * photo.imgEl.naturalHeight);
+  if (sw < 2 || sh < 2) return;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.drawImage(photo.imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  const sourceType = String(photo.file?.type || "").toLowerCase();
+  const outputType = sourceType === "image/png" ? "image/png" : "image/jpeg";
+  const blob = await canvasToBlob(canvas, outputType, 0.98);
+  if (!blob) return;
+
+  const dotIndex = photo.file.name.lastIndexOf(".");
+  const baseName = dotIndex > 0 ? photo.file.name.slice(0, dotIndex) : photo.file.name;
+  const extension = outputType === "image/png" ? "png" : "jpg";
+  const croppedFile = new File([blob], `${baseName}-crop.${extension}`, {
+    type: outputType,
+    lastModified: Date.now(),
+  });
+
+  const newPhoto = createPhotoRecord(croppedFile, {
+    adjustments: cloneAdjustments(photo.adjustments),
+    rotation: 0,
+    filmLookId: photo.filmLookId,
+    filmLookStrength: photo.filmLookStrength,
+    isEdited: true,
+    sourcePhotoId: photo.id,
+    rootPhotoId: photo.rootPhotoId ?? photo.id,
+    editVersion: Number(photo.editVersion ?? 0) + 1,
+  });
+
+  loadImageDimensions(newPhoto);
+  const selectedIndex = state.selectedIndex >= 0 ? state.selectedIndex : state.photos.indexOf(photo);
+  const insertIndex = Math.max(0, selectedIndex + 1);
+  state.photos.splice(insertIndex, 0, newPhoto);
+  renderFilmstrip();
+  selectPhoto(insertIndex);
+  setActiveTool("select");
+};
+
 const renderMetadata = (photo) => {
   if (!photo) {
     metaBlock.innerHTML = '<p class="meta-empty">Select a photo to inspect details.</p>';
@@ -2038,18 +2300,20 @@ const updateToolAvailability = () => {
   toolShapesBtn.disabled = !hasPhoto;
   toolEditBtn.classList.toggle("is-disabled", !hasPhoto);
   toolEditBtn.disabled = !hasPhoto;
+  toolCropBtn.classList.toggle("is-disabled", !hasPhoto);
+  toolCropBtn.disabled = !hasPhoto;
   if (!hasPhoto) {
     shapeFlyout.classList.add("hidden-panel");
     toolShapesBtn.classList.remove("is-active");
   }
-  if (!hasPhoto && state.activeTool === "text") {
-    state.activeTool = "select";
+  if (!hasPhoto && (state.activeTool === "text" || state.activeTool === "crop")) {
+    setActiveTool("select");
   }
 };
 
 const syncCompareControls = () => {
   const selected = getSelectedPhoto();
-  const canCompare = Boolean(selected?.isEdited && getCompareTargetPhoto(selected));
+  const canCompare = state.activeTool !== "crop" && Boolean(selected?.isEdited && getCompareTargetPhoto(selected));
   compareBtn.disabled = !canCompare;
   compareBtn.classList.toggle("is-disabled", !canCompare);
   compareBtnLabel.textContent = state.compareMode ? "Original" : "Compare";
@@ -3653,15 +3917,25 @@ const renderTextOverlays = () => {
 
 const setActiveTool = (tool) => {
   if (tool === "text" && !getSelectedPhoto()) return;
+  if (tool === "crop" && !getSelectedPhoto()) return;
   state.activeTool = tool;
   Object.entries(toolButtons).forEach(([key, btn]) => {
+    if (!btn) return;
     btn.classList.toggle("is-active", key === tool);
   });
   if (tool !== "shape") {
     shapeFlyout.classList.add("hidden-panel");
     toolShapesBtn.classList.remove("is-active");
   }
+  if (tool === "crop") {
+    state.compareMode = false;
+    if (cropAspectSelect) cropAspectSelect.value = state.cropAspect;
+    initializeCropRect();
+  } else {
+    clearCropState();
+  }
   renderTextOverlays();
+  renderCropOverlay();
 };
 
 const addTextOverlay = () => {
@@ -3772,7 +4046,7 @@ const applyAdjustmentsToPreview = () => {
   }
   mainPreview.style.filter = compareTarget ? "none" : buildCompositeFilter(photo);
   mainPreview.style.transform = `rotate(${previewSource.rotation}deg) scale(${state.zoom})`;
-  overlayLayer.style.visibility = compareTarget ? "hidden" : "visible";
+  overlayLayer.style.visibility = compareTarget || state.activeTool === "crop" ? "hidden" : "visible";
 
   sliderIds.forEach((id) => {
     const slider = document.getElementById(id);
@@ -3787,6 +4061,7 @@ const applyAdjustmentsToPreview = () => {
   syncFilmLookControls();
   syncCompareControls();
   renderTextOverlays();
+  renderCropOverlay();
 };
 
 const renderFilmstrip = () => {
@@ -4192,6 +4467,9 @@ const setZoom = (nextZoom) => {
   state.zoom = clamp(nextZoom, 0.2, 4);
   updateZoomLabel();
   applyPreviewTransform();
+  if (state.activeTool === "crop") {
+    renderCropOverlay();
+  }
 };
 
 const attachFilmstripResize = () => {
@@ -4518,6 +4796,15 @@ saveProjectBtn.addEventListener("click", () => {
 loadProjectBtn.addEventListener("click", () => projectInput.click());
 
 toolSelectBtn.addEventListener("click", () => setActiveTool("select"));
+toolCropBtn.addEventListener("click", () => {
+  const photo = getSelectedPhoto();
+  if (!photo) return;
+  if (photo.rotation !== 0) {
+    window.alert("Reset rotation before cropping for now.");
+    return;
+  }
+  setActiveTool("crop");
+});
 toolTextBtn.addEventListener("click", () => {
   if (!getSelectedPhoto()) return;
   setActiveTool("text");
@@ -4584,6 +4871,67 @@ toolPrintBtn.addEventListener("click", () => {
 });
 toolSettingsBtn?.addEventListener("click", () => {
   openSettingsModal();
+});
+
+cropAspectSelect?.addEventListener("change", (event) => {
+  state.cropAspect = String(event.target.value || "free");
+  const bounds = getImageBoundsInPreview();
+  if (!bounds || !state.cropRect) return;
+  const aspect = getCropAspectRatio();
+  state.cropRect = fitCropRectToAspect(state.cropRect, bounds, aspect);
+  renderCropOverlay();
+});
+
+cropCancelBtn?.addEventListener("click", () => {
+  setActiveTool("select");
+});
+
+cropApplyBtn?.addEventListener("click", async () => {
+  cropApplyBtn.disabled = true;
+  try {
+    await applyCropToSelectedPhoto();
+  } catch (error) {
+    window.alert(error?.message || "Unable to crop photo.");
+  } finally {
+    cropApplyBtn.disabled = false;
+  }
+});
+
+cropBox?.addEventListener("pointerdown", (event) => {
+  if (state.activeTool !== "crop" || !state.cropRect) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const target = event.target;
+  const handle = target?.dataset?.cropHandle || "move";
+  state.cropDrag = {
+    mode: handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    startRect: { ...state.cropRect },
+  };
+  cropBox.setPointerCapture(event.pointerId);
+});
+
+cropBox?.addEventListener("pointermove", (event) => {
+  if (!state.cropDrag) return;
+  updateCropRectFromPointer(event);
+});
+
+const endCropDrag = (event) => {
+  if (!state.cropDrag || !cropBox) return;
+  if (cropBox.hasPointerCapture(event.pointerId)) {
+    cropBox.releasePointerCapture(event.pointerId);
+  }
+  state.cropDrag = null;
+};
+
+cropBox?.addEventListener("pointerup", endCropDrag);
+cropBox?.addEventListener("pointercancel", endCropDrag);
+previewWrap?.addEventListener("scroll", () => {
+  if (state.activeTool === "crop") renderCropOverlay();
+});
+window.addEventListener("resize", () => {
+  if (state.activeTool === "crop") renderCropOverlay();
 });
 orderPrintBtn.addEventListener("click", () => {
   if (!getSelectedPhoto()) return;
@@ -4981,6 +5329,16 @@ const attachKeyboardNudging = () => {
       state.isSpacePressed = true;
       syncWorkspacePanCursor();
       event.preventDefault();
+    }
+    if (state.activeTool === "crop") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setActiveTool("select");
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void applyCropToSelectedPhoto();
+      }
+      return;
     }
     if (state.activeTool !== "select") return;
 

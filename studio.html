@@ -74,6 +74,9 @@
           <button id="toolUploadBtn" type="button" class="tool-btn" aria-label="Upload" title="Upload">
             <i data-lucide="upload"></i>
           </button>
+          <button id="toolCropBtn" type="button" class="tool-btn" aria-label="Crop" title="Crop">
+            <i data-lucide="crop"></i>
+          </button>
           <button id="toolTextBtn" type="button" class="tool-btn" aria-label="Text" title="Text">
             <i data-lucide="type"></i>
           </button>
@@ -128,6 +131,26 @@
           <div id="previewWrap" class="preview-wrap hidden">
             <img id="mainPreview" alt="Selected photo preview" />
             <div id="overlayLayer" class="overlay-layer"></div>
+            <div id="cropOverlay" class="crop-overlay hidden-panel" aria-hidden="true">
+              <div class="crop-toolbar">
+                <label for="cropAspectSelect">Aspect</label>
+                <select id="cropAspectSelect">
+                  <option value="free">Free</option>
+                  <option value="1:1">1:1</option>
+                  <option value="4:5">4:5</option>
+                  <option value="3:2">3:2</option>
+                  <option value="16:9">16:9</option>
+                </select>
+                <button id="cropApplyBtn" type="button">Apply</button>
+                <button id="cropCancelBtn" type="button">Cancel</button>
+              </div>
+              <div id="cropBox" class="crop-box">
+                <button type="button" class="crop-handle" data-crop-handle="nw" aria-label="Resize crop top left"></button>
+                <button type="button" class="crop-handle" data-crop-handle="ne" aria-label="Resize crop top right"></button>
+                <button type="button" class="crop-handle" data-crop-handle="sw" aria-label="Resize crop bottom left"></button>
+                <button type="button" class="crop-handle" data-crop-handle="se" aria-label="Resize crop bottom right"></button>
+              </div>
+            </div>
           </div>
         </section>
 

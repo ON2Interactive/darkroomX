@@ -1729,6 +1729,87 @@ body {
   pointer-events: auto;
 }
 
+.crop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2400;
+  pointer-events: auto;
+}
+
+.crop-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(17, 17, 17, 0.92);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.crop-toolbar label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.crop-toolbar select,
+.crop-toolbar button {
+  border: 1px solid var(--line);
+  background: #262626;
+  color: var(--text);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.crop-box {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.55);
+  cursor: move;
+  pointer-events: auto;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(20, 20, 20, 0.9);
+  padding: 0;
+  pointer-events: auto;
+}
+
+.crop-handle[data-crop-handle="nw"] {
+  top: -7px;
+  left: -7px;
+  cursor: nwse-resize;
+}
+
+.crop-handle[data-crop-handle="ne"] {
+  top: -7px;
+  right: -7px;
+  cursor: nesw-resize;
+}
+
+.crop-handle[data-crop-handle="sw"] {
+  left: -7px;
+  bottom: -7px;
+  cursor: nesw-resize;
+}
+
+.crop-handle[data-crop-handle="se"] {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
+}
+
 .snap-guide {
   position: absolute;
   pointer-events: none;
