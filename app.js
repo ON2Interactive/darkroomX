@@ -381,17 +381,56 @@ const probeDecodableImageFile = (file) =>
 const convertRawToPreviewFile = async (file) => {
   if (!file || !isRawUploadFile(file)) return { file: null, error: "Not a RAW file." };
   try {
-    const response = await authFetch("/api/raw-preview", {
+    const startResponse = await authFetch("/api/raw-preview/start", {
       method: "POST",
       headers: {
-        "Content-Type": "application/octet-stream",
-        "X-File-Name": encodeURIComponent(file.name || "raw-image"),
+        "Content-Type": "application/json",
       },
-      body: file,
+      body: JSON.stringify({ fileName: file.name || "raw-image" }),
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return { file: null, error: String(payload?.error || "RAW preview conversion failed.") };
+    const startPayload = await startResponse.json().catch(() => ({}));
+    if (!startResponse.ok) {
+      const startError = String(startPayload?.error || "").trim();
+      return { file: null, error: startError || `RAW conversion start failed (${startResponse.status}).` };
+    }
+
+    const uploadUrl = String(startPayload?.upload?.url || "").trim();
+    const uploadParameters = startPayload?.upload?.parameters;
+    const jobId = String(startPayload?.jobId || "").trim();
+    if (!uploadUrl || !uploadParameters || !jobId) {
+      return { file: null, error: "RAW conversion start returned invalid upload details." };
+    }
+
+    const uploadFormData = new FormData();
+    Object.entries(uploadParameters).forEach(([key, value]) => {
+      uploadFormData.append(key, String(value));
+    });
+    uploadFormData.append("file", file, file.name || "raw-image");
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "POST",
+      body: uploadFormData,
+      redirect: "follow",
+    }).catch(() => null);
+
+    if (!uploadResponse || !uploadResponse.ok) {
+      return { file: null, error: `RAW upload to conversion service failed (${uploadResponse?.status || "network"}).` };
+    }
+
+    const completeResponse = await authFetch("/api/raw-preview/complete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fileName: file.name || "raw-image",
+        jobId,
+      }),
+    });
+    const payload = await completeResponse.json().catch(() => ({}));
+    if (!completeResponse.ok) {
+      const completeError = String(payload?.error || "").trim();
+      return { file: null, error: completeError || `RAW preview conversion failed (${completeResponse.status}).` };
     }
 
     const dataUrl = String(payload?.dataUrl || "");

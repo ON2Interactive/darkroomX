@@ -1028,6 +1028,191 @@ async function cloudConvertConvertRawToImage(buffer, fileName, { apiKey, outputF
   };
 }
 
+async function cloudConvertCreateRawJob(fileName, { apiKey, outputFormat = "jpg", jpgQuality = 100, timeoutMs = 120_000 } = {}) {
+  if (!apiKey) {
+    return { ok: false, status: 500, error: "CloudConvert API key is not configured." };
+  }
+  const inputFormat = getFileExtension(fileName);
+  if (!inputFormat) {
+    return { ok: false, status: 400, error: "Missing RAW input format." };
+  }
+
+  const convertTask = {
+    operation: "convert",
+    input: "import_raw",
+    input_format: inputFormat,
+    output_format: outputFormat,
+  };
+  if (outputFormat === "jpg" || outputFormat === "jpeg") {
+    convertTask.quality = Number.isFinite(jpgQuality) ? Math.max(1, Math.min(100, Math.floor(jpgQuality))) : 100;
+  }
+
+  const createJob = await cloudConvertApiRequest(
+    "/jobs",
+    apiKey,
+    {
+      method: "POST",
+      timeoutMs,
+      payload: {
+        tasks: {
+          import_raw: {
+            operation: "import/upload",
+          },
+          convert_raw: convertTask,
+          export_converted: {
+            operation: "export/url",
+            input: "convert_raw",
+            inline: true,
+          },
+        },
+      },
+    },
+  );
+  if (!createJob.ok) return createJob;
+
+  const job = createJob.data || {};
+  const jobId = String(job?.id || "").trim();
+  if (!jobId) {
+    return { ok: false, status: 502, error: "CloudConvert job creation returned no job id." };
+  }
+
+  const importTask = getTaskByNameOrOperation(job?.tasks, "import_raw", "import/upload");
+  let uploadForm = importTask?.result?.form || null;
+  const importTaskId = String(importTask?.id || "").trim();
+
+  if (!uploadForm && importTaskId) {
+    const taskResult = await cloudConvertApiRequest(`/tasks/${encodeURIComponent(importTaskId)}`, apiKey, { timeoutMs });
+    if (!taskResult.ok) return taskResult;
+    uploadForm = taskResult.data?.result?.form || null;
+  }
+
+  if (!uploadForm?.url || typeof uploadForm?.parameters !== "object") {
+    return { ok: false, status: 502, error: "CloudConvert upload form is missing." };
+  }
+
+  return {
+    ok: true,
+    jobId,
+    uploadForm: {
+      url: String(uploadForm.url),
+      parameters: uploadForm.parameters,
+    },
+  };
+}
+
+async function cloudConvertFinalizeRawJob(jobId, fileName, { apiKey, outputFormat = "jpg", timeoutMs = 120_000 } = {}) {
+  if (!apiKey) {
+    return { ok: false, status: 500, error: "CloudConvert API key is not configured." };
+  }
+  const normalizedJobId = String(jobId || "").trim();
+  if (!normalizedJobId) {
+    return { ok: false, status: 400, error: "Missing CloudConvert job id." };
+  }
+
+  const waitJob = await cloudConvertApiRequest(
+    `/jobs/${encodeURIComponent(normalizedJobId)}`,
+    apiKey,
+    { baseUrl: "https://sync.api.cloudconvert.com/v2", timeoutMs },
+  );
+  if (!waitJob.ok) return waitJob;
+  const finishedJob = waitJob.data || {};
+  if (String(finishedJob?.status || "").toLowerCase() === "error") {
+    return { ok: false, status: 502, error: "CloudConvert conversion job failed." };
+  }
+
+  const exportTask = getTaskByNameOrOperation(finishedJob?.tasks, "export_converted", "export/url");
+  const exportFile = Array.isArray(exportTask?.result?.files) ? exportTask.result.files[0] : null;
+  const downloadUrl = String(exportFile?.url || "").trim();
+  if (!downloadUrl) {
+    return { ok: false, status: 502, error: "CloudConvert did not return an output file URL." };
+  }
+
+  const outputResponse = await fetch(downloadUrl).catch(() => null);
+  if (!outputResponse || !outputResponse.ok) {
+    return { ok: false, status: outputResponse?.status || 502, error: "Unable to download CloudConvert output file." };
+  }
+  const outputBuffer = Buffer.from(await outputResponse.arrayBuffer());
+  if (!outputBuffer.length) {
+    return { ok: false, status: 502, error: "CloudConvert output file was empty." };
+  }
+
+  return {
+    ok: true,
+    buffer: outputBuffer,
+    mimeType: String(outputResponse.headers.get("content-type") || `image/${outputFormat}`),
+    fileName: String(exportFile?.filename || buildPreviewFileName(fileName)),
+  };
+}
+
+async function handleRawPreviewStart(req, res) {
+  const auth = await getAuthenticatedSupabaseUser(req);
+  if (!auth.ok) {
+    return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
+  }
+  try {
+    const payload = await parseJsonBody(req, 64 * 1024);
+    const fileName = sanitizeFileName(String(payload?.fileName || "raw-image"));
+    if (!isLikelyRawFileName(fileName)) {
+      return sendJson(res, 400, { error: "Unsupported RAW filename." });
+    }
+    const cloudConvertConfig = getCloudConvertConfig();
+    if (!cloudConvertConfig.apiKey) {
+      return sendJson(res, 500, { error: "CloudConvert API key is not configured." });
+    }
+
+    const start = await cloudConvertCreateRawJob(fileName, cloudConvertConfig);
+    if (!start.ok) {
+      return sendJson(res, start.status || 502, { error: start.error || "Unable to start RAW conversion." });
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      jobId: start.jobId,
+      upload: start.uploadForm,
+    });
+  } catch (error) {
+    return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+  }
+}
+
+async function handleRawPreviewComplete(req, res) {
+  const auth = await getAuthenticatedSupabaseUser(req);
+  if (!auth.ok) {
+    return sendJson(res, auth.status || 401, { error: auth.error || "Unauthorized." });
+  }
+  try {
+    const payload = await parseJsonBody(req, 64 * 1024);
+    const fileName = sanitizeFileName(String(payload?.fileName || "raw-image"));
+    const jobId = String(payload?.jobId || "").trim();
+    if (!isLikelyRawFileName(fileName)) {
+      return sendJson(res, 400, { error: "Unsupported RAW filename." });
+    }
+    if (!jobId) {
+      return sendJson(res, 400, { error: "Missing conversion job id." });
+    }
+
+    const cloudConvertConfig = getCloudConvertConfig();
+    if (!cloudConvertConfig.apiKey) {
+      return sendJson(res, 500, { error: "CloudConvert API key is not configured." });
+    }
+
+    const complete = await cloudConvertFinalizeRawJob(jobId, fileName, cloudConvertConfig);
+    if (!complete.ok || !complete.buffer?.length) {
+      return sendJson(res, complete.status || 502, { error: complete.error || "RAW preview conversion failed." });
+    }
+
+    const mimeType = String(complete.mimeType || "image/jpeg");
+    const dataUrl = `data:${mimeType};base64,${complete.buffer.toString("base64")}`;
+    return sendJson(res, 200, {
+      ok: true,
+      fileName: sanitizeFileName(complete.fileName || buildPreviewFileName(fileName)),
+      mimeType,
+      dataUrl,
+    });
+  } catch (error) {
+    return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
+  }
+}
+
 function extractJpegFromTiffPreview(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 16) return null;
   const byteOrder = buffer.toString("ascii", 0, 2);
@@ -3289,6 +3474,14 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/raw-preview") {
     handleRawPreview(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/raw-preview/start") {
+    handleRawPreviewStart(req, res);
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/raw-preview/complete") {
+    handleRawPreviewComplete(req, res);
     return;
   }
   if (req.method === "POST" && pathname === "/api/peecho/print-order") {
