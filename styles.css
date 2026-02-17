@@ -640,6 +640,19 @@ body {
   filter: blur(0);
 }
 
+.landing-wallart-image-wrap[data-reveal] {
+  opacity: 0;
+  transform: translateY(26px) scale(0.985);
+  filter: blur(2px);
+  transition: opacity 620ms ease, transform 620ms ease, filter 620ms ease;
+}
+
+.landing-wallart-image-wrap[data-reveal].is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
 .landing-app-ui-copy {
   width: min(980px, 100%);
   margin: 0 auto 60px;
@@ -1437,7 +1450,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-app-ui-inner[data-reveal] {
+  .landing-app-ui-inner[data-reveal],
+  .landing-wallart-image-wrap[data-reveal] {
     opacity: 1;
     transform: none;
     filter: none;
