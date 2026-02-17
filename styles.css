@@ -782,6 +782,54 @@ body {
   line-height: 1.55;
 }
 
+.landing-wallart {
+  background: linear-gradient(180deg, #0d0d0d 0%, #070707 100%);
+  min-height: 800px;
+  padding: 100px 20px 160px;
+}
+
+.landing-wallart-inner {
+  width: min(1400px, 100%);
+  margin: 0 auto;
+}
+
+.landing-wallart-copy {
+  width: min(980px, 100%);
+  margin: 0 auto 60px;
+  padding: 0 12px;
+  text-align: center;
+}
+
+.landing-wallart-copy h1 {
+  margin: 0 0 14px;
+  font-size: 42px;
+  line-height: 1.04;
+  color: var(--soft-white);
+}
+
+.landing-wallart-copy p {
+  margin: 0 auto;
+  max-width: 960px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.landing-wallart-image-wrap {
+  width: min(1260px, 100%);
+  margin: 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.landing-wallart-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .landing-users {
   background-color: #131313;
   background-image:
@@ -1235,6 +1283,19 @@ body {
     font-size: 30px;
   }
 
+  .landing-wallart {
+    padding: 34px 14px 112px;
+  }
+
+  .landing-wallart-copy {
+    margin-bottom: 24px;
+    padding: 0 8px;
+  }
+
+  .landing-wallart-copy h1 {
+    font-size: 30px;
+  }
+
   .landing-users {
     padding: 34px 14px 112px;
   }
@@ -1331,6 +1392,10 @@ body {
   }
 
   .landing-features {
+    padding-bottom: 132px;
+  }
+
+  .landing-wallart {
     padding-bottom: 132px;
   }
 
