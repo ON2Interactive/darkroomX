@@ -3612,47 +3612,58 @@ async function handlePrintSpacePullUrl(req, res) {
       return sendJson(res, 200, { ok: true, checkoutUrl, mode: "pull-link" });
     }
 
-    if (!printSpace.storeCode) {
-      return sendJson(res, 500, { error: "Missing PRINTSPACE_STORE_CODE for PrintSpace API mode." });
-    }
-
     const mappedProductCode = productType === "canvas_print" ? "canvas" : productType === "poster_print" ? "poster" : "framed-print";
-    const candidateUrls = [
-      `${printSpace.apiBaseUrl}/v1/stores/${encodeURIComponent(printSpace.storeCode)}/orders/link`,
-    ];
+    const encodedStore = encodeURIComponent(printSpace.storeCode || "");
+    const candidateUrls = [];
+    if (encodedStore) {
+      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/link`);
+      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/links`);
+      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/order-link`);
+      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/order-links`);
+    }
+    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/orders/link`);
+    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/orders/links`);
+    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/order-link`);
+    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/order-links`);
+    candidateUrls.push(`${printSpace.apiBaseUrl}/orders/link`);
+    candidateUrls.push(`${printSpace.apiBaseUrl}/orders/links`);
+
+    const authHeaders = [`ApiKey ${printSpace.apiKey}`, `Bearer ${printSpace.apiKey}`];
     let lastReason = "Unable to create PrintSpace order link.";
     for (const url of candidateUrls) {
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${printSpace.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            orderName: fileName,
-            products: [
-              {
-                quantity: 1,
-                productType: { code: mappedProductCode },
-                printImages: [{ url: publicImageUrl }],
-              },
-            ],
-          }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (response.ok) {
-          const checkoutUrl = String(
-            data?.checkout_url || data?.checkoutUrl || data?.url || data?.link || data?.data?.checkout_url || "",
-          ).trim();
-          if (!checkoutUrl) {
-            return sendJson(res, 502, { error: "PrintSpace API returned success but no checkout URL." });
+      for (const authHeader of authHeaders) {
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              orderName: fileName,
+              products: [
+                {
+                  quantity: 1,
+                  productType: { code: mappedProductCode },
+                  printImages: [{ url: publicImageUrl }],
+                },
+              ],
+            }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (response.ok) {
+            const checkoutUrl = String(
+              data?.checkout_url || data?.checkoutUrl || data?.url || data?.link || data?.data?.checkout_url || "",
+            ).trim();
+            if (!checkoutUrl) {
+              return sendJson(res, 502, { error: "PrintSpace API returned success but no checkout URL." });
+            }
+            return sendJson(res, 200, { ok: true, checkoutUrl, mode: "api" });
           }
-          return sendJson(res, 200, { ok: true, checkoutUrl, mode: "api" });
+          lastReason = `[${response.status}] ${String(data?.error || data?.message || response.statusText || lastReason)} @ ${url} (${authHeader.startsWith("ApiKey ") ? "ApiKey" : "Bearer"})`;
+        } catch (error) {
+          lastReason = `${error?.message || "Request failed"} @ ${url}`;
         }
-        lastReason = String(data?.error || data?.message || response.statusText || lastReason);
-      } catch (error) {
-        lastReason = error?.message || lastReason;
       }
     }
 
