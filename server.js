@@ -209,7 +209,8 @@ function getPrintSpaceConfig() {
   const pullPathRaw = normalizeEnvValue(process.env.PRINTSPACE_PULL_PATH || "/api/pull");
   const pullPath = pullPathRaw.startsWith("/") ? pullPathRaw : `/${pullPathRaw}`;
   const apiBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_API_BASE_URL || "https://api.creativehub.io/api").replace(/\/$/, "");
-  return { apiKey, storeCode, accessKey, storeBaseUrl, pullPath, apiBaseUrl };
+  const orderLinkPath = normalizeEnvValue(process.env.PRINTSPACE_ORDER_LINK_PATH || "");
+  return { apiKey, storeCode, accessKey, storeBaseUrl, pullPath, apiBaseUrl, orderLinkPath };
 }
 
 function getTrialWindowMs() {
@@ -3615,6 +3616,11 @@ async function handlePrintSpacePullUrl(req, res) {
     const mappedProductCode = productType === "canvas_print" ? "canvas" : productType === "poster_print" ? "poster" : "framed-print";
     const encodedStore = encodeURIComponent(printSpace.storeCode || "");
     const candidateUrls = [];
+    const explicitOrderLinkPath = String(printSpace.orderLinkPath || "").trim();
+    if (explicitOrderLinkPath) {
+      const normalizedExplicitPath = explicitOrderLinkPath.startsWith("/") ? explicitOrderLinkPath : `/${explicitOrderLinkPath}`;
+      candidateUrls.push(`${printSpace.apiBaseUrl}${normalizedExplicitPath}`);
+    }
     if (encodedStore) {
       candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/link`);
       candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/links`);
