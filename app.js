@@ -5295,9 +5295,7 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 toolPrintBtn.addEventListener("click", () => {
-  openWallartModal().catch((error) => {
-    window.alert(error?.message || "Unable to open Wallart checkout.");
-  });
+  window.print();
 });
 toolLibraryBtn?.addEventListener("click", () => {
   void openLibraryModal();
