@@ -197,22 +197,6 @@ function getCanvasPopConfig() {
   return { accessKey, secretKey, storeBaseUrl, signedUrlTtlSeconds };
 }
 
-function getPrintSpaceConfig() {
-  const apiKey = normalizeEnvValue(
-    process.env.PRINTSPACE_API_KEY || process.env.THEPRINTSPACE_API_KEY || process.env.PRINTSPACE_KEY || "",
-  );
-  const storeCodeFromEnv = normalizeEnvValue(process.env.PRINTSPACE_STORE_CODE || "");
-  const fallbackStoreCode = apiKey.toLowerCase().startsWith("production-") ? apiKey : "";
-  const storeCode = storeCodeFromEnv || fallbackStoreCode;
-  const accessKey = normalizeEnvValue(process.env.PRINTSPACE_ACCESS_KEY || "");
-  const storeBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_STORE_BASE_URL || "").replace(/\/$/, "");
-  const pullPathRaw = normalizeEnvValue(process.env.PRINTSPACE_PULL_PATH || "/api/pull");
-  const pullPath = pullPathRaw.startsWith("/") ? pullPathRaw : `/${pullPathRaw}`;
-  const apiBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_API_BASE_URL || "https://api.creativehub.io/api").replace(/\/$/, "");
-  const orderLinkPath = normalizeEnvValue(process.env.PRINTSPACE_ORDER_LINK_PATH || "");
-  return { apiKey, storeCode, accessKey, storeBaseUrl, pullPath, apiBaseUrl, orderLinkPath };
-}
-
 function getTrialWindowMs() {
   const hoursRaw = Number(process.env.TRIAL_HOURS || "24");
   const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, Math.floor(hoursRaw))) : 24;
@@ -3533,152 +3517,6 @@ async function handleCanvasPopPullUrl(req, res) {
   }
 }
 
-async function handlePrintSpacePullUrl(req, res) {
-  const authResult = await getAuthenticatedSupabaseUser(req);
-  if (!authResult.ok) {
-    return sendJson(res, authResult.status || 401, { error: authResult.error || "Unauthorized." });
-  }
-
-  const printSpace = getPrintSpaceConfig();
-  if (!printSpace.apiKey && !(printSpace.accessKey && printSpace.storeBaseUrl)) {
-    return sendJson(res, 500, {
-      error:
-        "PrintSpace is not configured. Set PRINTSPACE_API_KEY (or THEPRINTSPACE_API_KEY / PRINTSPACE_KEY), or set PRINTSPACE_ACCESS_KEY + PRINTSPACE_STORE_BASE_URL for pull-link mode.",
-    });
-  }
-
-  const service = getSupabaseServiceHeaders(req);
-  if (!service.ok) {
-    return sendJson(res, 500, { error: service.error });
-  }
-
-  try {
-    const payload = await parseJsonBody(req, 40 * 1024 * 1024);
-    const imageDataUrl = String(payload?.imageDataUrl || "").trim();
-    const fileName = sanitizeFileName(String(payload?.fileName || "wallart-preview.jpg"));
-    const productType = String(payload?.productType || "framed_print").trim();
-    const decoded = decodeDataUrl(imageDataUrl);
-    if (!decoded?.buffer?.length) {
-      return sendJson(res, 400, { error: "Invalid image payload." });
-    }
-    if (!/^image\/(png|jpeg|jpg|webp)$/i.test(decoded.mimeType || "")) {
-      return sendJson(res, 400, { error: "Unsupported image type for Wallart. Use JPEG, PNG, or WEBP." });
-    }
-
-    const bucketReady = await ensureCanvasPopUploadsBucket(service);
-    if (!bucketReady.ok) {
-      return sendJson(res, bucketReady.status || 500, { error: bucketReady.error || "Unable to prepare upload bucket." });
-    }
-
-    const userId = String(authResult.user?.id || "").trim();
-    const objectPath = buildCanvasPopUploadObjectPath(userId, fileName, decoded.mimeType);
-    const { config, headers } = service;
-
-    const uploadResponse = await fetch(`${config.url}/storage/v1/object/${CANVASPOP_UPLOADS_BUCKET}/${objectPath}`, {
-      method: "POST",
-      headers: {
-        ...headers,
-        "Content-Type": decoded.mimeType,
-        "x-upsert": "false",
-      },
-      body: decoded.buffer,
-    });
-    if (!uploadResponse.ok) {
-      const reason = await uploadResponse.text().catch(() => "");
-      return sendJson(res, 502, { error: `Unable to upload Wallart preview.${reason ? ` ${reason}` : ""}` });
-    }
-
-    const signResponse = await fetch(`${config.url}/storage/v1/object/sign/${CANVASPOP_UPLOADS_BUCKET}/${objectPath}`, {
-      method: "POST",
-      headers: {
-        ...headers,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ expiresIn: 900 }),
-    });
-    if (!signResponse.ok) {
-      const reason = await signResponse.text().catch(() => "");
-      return sendJson(res, 502, { error: `Unable to sign Wallart preview URL.${reason ? ` ${reason}` : ""}` });
-    }
-
-    const signPayload = await signResponse.json().catch(() => ({}));
-    const signedRelativeUrl = String(signPayload?.signedURL || "").trim();
-    if (!signedRelativeUrl) {
-      return sendJson(res, 502, { error: "Storage sign URL response was empty." });
-    }
-    const publicImageUrl = `${config.url}/storage/v1${signedRelativeUrl}`;
-
-    if (printSpace.accessKey && printSpace.storeBaseUrl) {
-      const checkoutUrl = `${printSpace.storeBaseUrl}${printSpace.pullPath}?access_key=${encodeURIComponent(printSpace.accessKey)}&image_url=${encodeURIComponent(publicImageUrl)}`;
-      return sendJson(res, 200, { ok: true, checkoutUrl, mode: "pull-link" });
-    }
-
-    const mappedProductCode = productType === "canvas_print" ? "canvas" : productType === "poster_print" ? "poster" : "framed-print";
-    const encodedStore = encodeURIComponent(printSpace.storeCode || "");
-    const candidateUrls = [];
-    const explicitOrderLinkPath = String(printSpace.orderLinkPath || "").trim();
-    if (explicitOrderLinkPath) {
-      const normalizedExplicitPath = explicitOrderLinkPath.startsWith("/") ? explicitOrderLinkPath : `/${explicitOrderLinkPath}`;
-      candidateUrls.push(`${printSpace.apiBaseUrl}${normalizedExplicitPath}`);
-    }
-    if (encodedStore) {
-      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/link`);
-      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/orders/links`);
-      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/order-link`);
-      candidateUrls.push(`${printSpace.apiBaseUrl}/v1/stores/${encodedStore}/order-links`);
-    }
-    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/orders/link`);
-    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/orders/links`);
-    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/order-link`);
-    candidateUrls.push(`${printSpace.apiBaseUrl}/v1/order-links`);
-    candidateUrls.push(`${printSpace.apiBaseUrl}/orders/link`);
-    candidateUrls.push(`${printSpace.apiBaseUrl}/orders/links`);
-
-    const authHeaders = [`ApiKey ${printSpace.apiKey}`, `Bearer ${printSpace.apiKey}`];
-    let lastReason = "Unable to create PrintSpace order link.";
-    for (const url of candidateUrls) {
-      for (const authHeader of authHeaders) {
-        try {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: {
-              Authorization: authHeader,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              orderName: fileName,
-              products: [
-                {
-                  quantity: 1,
-                  productType: { code: mappedProductCode },
-                  printImages: [{ url: publicImageUrl }],
-                },
-              ],
-            }),
-          });
-          const data = await response.json().catch(() => ({}));
-          if (response.ok) {
-            const checkoutUrl = String(
-              data?.checkout_url || data?.checkoutUrl || data?.url || data?.link || data?.data?.checkout_url || "",
-            ).trim();
-            if (!checkoutUrl) {
-              return sendJson(res, 502, { error: "PrintSpace API returned success but no checkout URL." });
-            }
-            return sendJson(res, 200, { ok: true, checkoutUrl, mode: "api" });
-          }
-          lastReason = `[${response.status}] ${String(data?.error || data?.message || response.statusText || lastReason)} @ ${url} (${authHeader.startsWith("ApiKey ") ? "ApiKey" : "Bearer"})`;
-        } catch (error) {
-          lastReason = `${error?.message || "Request failed"} @ ${url}`;
-        }
-      }
-    }
-
-    return sendJson(res, 502, { error: `PrintSpace API request failed. ${lastReason}` });
-  } catch (error) {
-    return sendJson(res, 400, { error: error?.message || "Invalid request payload." });
-  }
-}
-
 function serveStatic(req, res) {
   const rawPath = decodeURIComponent(req.url.split("?")[0] || "/");
   if (rawPath === "/admin" && !isAdminAuthenticated(req)) {
@@ -3878,10 +3716,6 @@ function requestHandler(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/canvaspop/pull-url") {
     handleCanvasPopPullUrl(req, res);
-    return;
-  }
-  if (req.method === "POST" && pathname === "/api/printspace/pull-url") {
-    handlePrintSpacePullUrl(req, res);
     return;
   }
   if (req.method === "GET" && pathname.startsWith("/api/print-assets/")) {
