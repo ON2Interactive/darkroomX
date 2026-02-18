@@ -3805,6 +3805,10 @@ const submitEditRequest = async () => {
   try {
     setEditSubmitState(true);
     closeEditModal();
+    const isSubscriptionAiError = (message) => {
+      const text = String(message || "").toLowerCase();
+      return text.includes("active subscription") || text.includes("trial access includes manual editing only");
+    };
     const failures = [];
     const failedTargets = [];
     let lastInsertedId = null;
@@ -3937,16 +3941,32 @@ const submitEditRequest = async () => {
     renderFilmstrip();
 
     if (failures.length > 0) {
-      const summary = failures.length === targets.length
-        ? "Unable to apply AI edit."
-        : `Applied with ${failures.length} failure${failures.length === 1 ? "" : "s"}.`;
-      editProcessingStatus.textContent = summary;
-      window.alert([summary, "Provider returned temporary internal errors for some images.", "", ...failures].join("\n"));
+      const hasSubscriptionFailure = failures.some((item) => isSubscriptionAiError(item));
+      if (hasSubscriptionFailure) {
+        const subscriptionMessage = "Subscribe to use AI Features";
+        editProcessingStatus.textContent = subscriptionMessage;
+        window.alert(subscriptionMessage);
+      } else {
+        const summary = failures.length === targets.length
+          ? "Unable to apply AI edit."
+          : `Applied with ${failures.length} failure${failures.length === 1 ? "" : "s"}.`;
+        editProcessingStatus.textContent = summary;
+        window.alert([summary, "Provider returned temporary internal errors for some images.", "", ...failures].join("\n"));
+      }
     }
   } catch (error) {
     const message = error.message || "Unable to apply image edit.";
-    editProcessingStatus.textContent = "Unable to apply AI edit.";
-    window.alert(message);
+    if (
+      String(message || "").toLowerCase().includes("active subscription") ||
+      String(message || "").toLowerCase().includes("trial access includes manual editing only")
+    ) {
+      const subscriptionMessage = "Subscribe to use AI Features";
+      editProcessingStatus.textContent = subscriptionMessage;
+      window.alert(subscriptionMessage);
+    } else {
+      editProcessingStatus.textContent = "Unable to apply AI edit.";
+      window.alert(message);
+    }
   } finally {
     setEditSubmitState(false);
   }
