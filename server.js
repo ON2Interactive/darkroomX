@@ -201,12 +201,15 @@ function getPrintSpaceConfig() {
   const apiKey = normalizeEnvValue(
     process.env.PRINTSPACE_API_KEY || process.env.THEPRINTSPACE_API_KEY || process.env.PRINTSPACE_KEY || "",
   );
+  const storeCodeFromEnv = normalizeEnvValue(process.env.PRINTSPACE_STORE_CODE || "");
+  const fallbackStoreCode = apiKey.toLowerCase().startsWith("production-") ? apiKey : "";
+  const storeCode = storeCodeFromEnv || fallbackStoreCode;
   const accessKey = normalizeEnvValue(process.env.PRINTSPACE_ACCESS_KEY || "");
   const storeBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_STORE_BASE_URL || "").replace(/\/$/, "");
   const pullPathRaw = normalizeEnvValue(process.env.PRINTSPACE_PULL_PATH || "/api/pull");
   const pullPath = pullPathRaw.startsWith("/") ? pullPathRaw : `/${pullPathRaw}`;
-  const apiBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_API_BASE_URL || "https://api.creativehub.io").replace(/\/$/, "");
-  return { apiKey, accessKey, storeBaseUrl, pullPath, apiBaseUrl };
+  const apiBaseUrl = normalizeEnvValue(process.env.PRINTSPACE_API_BASE_URL || "https://api.creativehub.io/api").replace(/\/$/, "");
+  return { apiKey, storeCode, accessKey, storeBaseUrl, pullPath, apiBaseUrl };
 }
 
 function getTrialWindowMs() {
@@ -3609,10 +3612,13 @@ async function handlePrintSpacePullUrl(req, res) {
       return sendJson(res, 200, { ok: true, checkoutUrl, mode: "pull-link" });
     }
 
+    if (!printSpace.storeCode) {
+      return sendJson(res, 500, { error: "Missing PRINTSPACE_STORE_CODE for PrintSpace API mode." });
+    }
+
+    const mappedProductCode = productType === "canvas_print" ? "canvas" : productType === "poster_print" ? "poster" : "framed-print";
     const candidateUrls = [
-      `${printSpace.apiBaseUrl}/v1/order-links`,
-      `${printSpace.apiBaseUrl}/api/v1/order-links`,
-      `${printSpace.apiBaseUrl}/v1/checkout-links`,
+      `${printSpace.apiBaseUrl}/v1/stores/${encodeURIComponent(printSpace.storeCode)}/orders/link`,
     ];
     let lastReason = "Unable to create PrintSpace order link.";
     for (const url of candidateUrls) {
@@ -3624,10 +3630,14 @@ async function handlePrintSpacePullUrl(req, res) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            image_url: publicImageUrl,
-            product_type: productType,
-            filename: fileName,
-            source: "darkroomx",
+            orderName: fileName,
+            products: [
+              {
+                quantity: 1,
+                productType: { code: mappedProductCode },
+                printImages: [{ url: publicImageUrl }],
+              },
+            ],
           }),
         });
         const data = await response.json().catch(() => ({}));
