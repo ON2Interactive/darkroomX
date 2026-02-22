@@ -481,7 +481,7 @@ body {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 4;
-  height: 78px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1217,7 +1217,7 @@ body {
 
 @media (max-width: 780px) {
   .landing-nav {
-    height: 68px;
+    height: 60px;
     padding: 0 14px;
   }
 
@@ -1397,6 +1397,27 @@ body {
     align-items: flex-end;
     gap: 10px;
   }
+}
+
+/* Common pages clean chrome: remove borders/backgrounds from buttons and icon controls. */
+body.common-page button,
+body.common-page .icon-btn,
+body.common-page .landing-cta-link {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body.common-page button:hover:not(:disabled),
+body.common-page .icon-btn:hover:not(:disabled),
+body.common-page .landing-cta-link:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+body.common-page button:active:not(:disabled),
+body.common-page .icon-btn:active:not(:disabled),
+body.common-page .landing-cta-link:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12) !important;
 }
 
 @media (min-width: 781px) and (max-width: 1120px) {
