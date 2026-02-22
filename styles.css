@@ -3321,6 +3321,57 @@ body {
   }
 }
 
+/* Studio clean chrome: remove borders/backgrounds from buttons and icon controls. */
+body.studio-page button,
+body.studio-page .icon-btn,
+body.studio-page .tool-btn,
+body.studio-page .shape-option-btn,
+body.studio-page .settings-menu-link,
+body.studio-page .settings-projects-action,
+body.studio-page .settings-projects-action-icon,
+body.studio-page .ai-modal-actions button,
+body.studio-page .generate-modal-actions button,
+body.studio-page .library-actions button,
+body.studio-page .wallart-modal-footer button,
+body.studio-page .credits-modal-footer button,
+body.studio-page .trial-lock-actions button {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body.studio-page button:hover:not(:disabled),
+body.studio-page .icon-btn:hover:not(:disabled),
+body.studio-page .tool-btn:hover:not(:disabled),
+body.studio-page .shape-option-btn:hover:not(:disabled),
+body.studio-page .settings-menu-link:hover:not(:disabled),
+body.studio-page .settings-projects-action:hover:not(:disabled),
+body.studio-page .settings-projects-action-icon:hover:not(:disabled),
+body.studio-page .ai-modal-actions button:hover:not(:disabled),
+body.studio-page .generate-modal-actions button:hover:not(:disabled),
+body.studio-page .library-actions button:hover:not(:disabled),
+body.studio-page .wallart-modal-footer button:hover:not(:disabled),
+body.studio-page .credits-modal-footer button:hover:not(:disabled),
+body.studio-page .trial-lock-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+body.studio-page button:active:not(:disabled),
+body.studio-page .icon-btn:active:not(:disabled),
+body.studio-page .tool-btn:active:not(:disabled),
+body.studio-page .shape-option-btn:active:not(:disabled),
+body.studio-page .settings-menu-link:active:not(:disabled),
+body.studio-page .settings-projects-action:active:not(:disabled),
+body.studio-page .settings-projects-action-icon:active:not(:disabled),
+body.studio-page .ai-modal-actions button:active:not(:disabled),
+body.studio-page .generate-modal-actions button:active:not(:disabled),
+body.studio-page .library-actions button:active:not(:disabled),
+body.studio-page .wallart-modal-footer button:active:not(:disabled),
+body.studio-page .credits-modal-footer button:active:not(:disabled),
+body.studio-page .trial-lock-actions button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
 @media (max-width: 960px) {
   .wallart-modal-body {
     grid-template-columns: 1fr;
